@@ -1,4 +1,4 @@
-.PHONY: help install fmt lint test test-integration cov bench guard readme-check doctor security ci up down clean
+.PHONY: help install fmt lint test test-integration cov cov-unit bench guard readme-check doctor security ci up down clean
 
 # Keep every target in step with .github/workflows/ci.yml, so a green local run
 # and a green CI run mean the same thing. When they disagree, CI is right and
@@ -25,7 +25,10 @@ test: ## Unit tests, no Postgres or Redis needed
 test-integration: ## Full suite including anything that needs live services
 	$(PY) pytest
 
-cov: ## Unit tests with the coverage gate (90%)
+cov: ## Full suite with the coverage gate (90%). Needs Postgres and Redis.
+	$(PY) pytest -m "not benchmark" --cov=complylayer --cov-report=term-missing
+
+cov-unit: ## Coverage over the docker-free subset only, for a quick local check
 	$(PY) pytest -m "not integration and not benchmark" --cov=complylayer --cov-report=term-missing
 
 bench: ## The D1 benchmark — where the latency budget actually goes

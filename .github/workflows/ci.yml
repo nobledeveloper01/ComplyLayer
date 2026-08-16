@@ -48,6 +48,35 @@ jobs:
   quality:
     name: quality
     runs-on: ubuntu-latest
+
+    # Postgres and Redis are services here rather than mocks because the things
+    # this job has to prove are properties of the real ones: that the decisions
+    # table is genuinely partitioned, that the audit trigger genuinely refuses an
+    # UPDATE, and that tenant isolation genuinely returns nothing. A fake would
+    # only ever confirm the fake.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: complylayer
+          POSTGRES_USER: complylayer
+          POSTGRES_PASSWORD: complylayer
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U complylayer"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+
+    env:
+      COMPLYLAYER_DB_HOST: 127.0.0.1
+      COMPLYLAYER_DB_PORT: "5432"
+      COMPLYLAYER_REDIS_URL: redis://127.0.0.1:6379/2
+
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -65,7 +94,7 @@ jobs:
           uv run ruff format --check .
 
       - name: tests with coverage gate
-        run: uv run pytest -m "not integration" --cov=complylayer --cov-report=term-missing
+        run: uv run pytest -m "not benchmark" --cov=complylayer --cov-report=term-missing
 
       - name: migrations are committed
         run: uv run python manage.py makemigrations --check --dry-run
