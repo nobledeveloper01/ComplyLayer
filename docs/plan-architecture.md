@@ -138,10 +138,18 @@ get this wrong turn it from a safety net into a false one.
   failure RLS was added to prevent.
 - pgbouncer runs in **transaction** mode. Session mode plus `SET LOCAL` is fine; session mode plus a
   stray session-scoped `SET` is not, and transaction mode removes the possibility.
-- The application role is **not the owner of any table**. A table owner bypasses RLS unless
-  `FORCE ROW LEVEL SECURITY` is set, and relying on remembering `FORCE` on every future table is the
-  kind of control that holds until the day it doesn't. Migrations run as a separate owner role with
-  no runtime credentials.
+- The application role is **not the owner of any table**, and — the part this decision originally
+  missed — **not a superuser and not granted `BYPASSRLS`**. `FORCE ROW LEVEL SECURITY` handles the
+  owner case, and handles nothing else: Postgres exempts SUPERUSER and BYPASSRLS roles from every
+  policy unconditionally, whatever the table says.
+
+  Found by writing the test in phase 5. The policies were correct, `FORCE` was set, `\d` showed
+  everything right, and every policy was being skipped — because the role `docker-compose` creates
+  by default is a superuser. Layer three was decoration, and nothing in the schema said so.
+
+  Migration `0006` creates `complylayer_app` with `NOSUPERUSER NOBYPASSRLS`, and
+  `complylayer_doctor` inspects the connecting role, because a control that is invisible when it
+  fails needs something that looks at it deliberately.
 - A CI test opens a fresh pooled connection and asserts `current_setting('complylayer.tenant_id',
   true)` is null before any request sets it, then asserts a cross-tenant read returns zero rows with
   the query layer deliberately bypassed.

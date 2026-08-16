@@ -206,6 +206,54 @@ def check_audit_immutability(trigger_names: list[str] | None, error: Exception |
     return CheckResult(name="audit trail", ok=True, detail="append-only enforced by the database")
 
 
+def check_rls_effective(
+    role: str | None,
+    is_superuser: bool | None,
+    bypasses_rls: bool | None,
+    error: Exception | None = None,
+) -> CheckResult:
+    """Row Level Security is inert for a superuser, and says nothing about it.
+
+    This is the failure the whole project keeps aiming at: a control that looks
+    configured and does nothing. The policies exist, `FORCE ROW LEVEL SECURITY`
+    is set, `\\d` shows everything correct — and every policy is skipped, because
+    Postgres exempts superusers and roles with BYPASSRLS unconditionally.
+
+    Found by writing the test: the default docker-compose role is a superuser,
+    so layer three was silently doing nothing in development and would have been
+    equally silent in any deployment that reused those credentials.
+    """
+    if error is not None:
+        return CheckResult(
+            name="row level security",
+            ok=False,
+            detail=f"could not read the connecting role: {error}",
+            remediation="Check the database connection.",
+        )
+
+    if is_superuser or bypasses_rls:
+        why = "a superuser" if is_superuser else "granted BYPASSRLS"
+        return CheckResult(
+            name="row level security",
+            ok=False,
+            # A warning rather than a failure, because the default docker-compose
+            # setup connects as a superuser and a development machine should not
+            # be blocked by that. `--strict` makes every warning fatal, which is
+            # what a deploy pipeline should run: this must not reach production.
+            fatal=False,
+            detail=f"connecting as {role!r}, which is {why} — every policy is skipped",
+            remediation="Connect as a role that is neither SUPERUSER nor BYPASSRLS, and which "
+            "does not own the tables. Until then tenant isolation rests on application code "
+            "alone, and the database layer is decoration.",
+        )
+
+    return CheckResult(
+        name="row level security",
+        ok=True,
+        detail=f"policies apply to {role!r}",
+    )
+
+
 def summarise(results: list[CheckResult]) -> tuple[int, int]:
     """Return (failures, warnings). The exit code is the count of fatal failures."""
     failures = sum(1 for r in results if not r.ok and r.fatal)

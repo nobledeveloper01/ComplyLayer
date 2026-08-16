@@ -47,6 +47,7 @@ def doctor_environment(*, pg_version=160004, db_error=None, redis_client=None, n
             ("complylayer_audit_append_only",),
             ("complylayer_audit_no_truncate",),
         ]
+        cursor.fetchone.return_value = ("complylayer_app", False, False)
 
     with (
         mock.patch(f"{MODULE}.connection", connection),
@@ -71,7 +72,14 @@ class TestHealthyDeployment:
     def test_lists_every_check(self):
         with doctor_environment():
             output = run_doctor()
-        for name in ("python version", "database", "redis", "clock skew", "audit trail"):
+        for name in (
+            "python version",
+            "database",
+            "redis",
+            "clock skew",
+            "audit trail",
+            "row level security",
+        ):
             assert name in output
 
 

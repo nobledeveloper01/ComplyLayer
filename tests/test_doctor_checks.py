@@ -176,3 +176,36 @@ class TestAuditImmutability:
         result = checks.check_audit_immutability(None, error=RuntimeError("permission denied"))
         assert not result.ok
         assert "permission denied" in result.detail
+
+
+class TestRowLevelSecurityIsEffective:
+    """The check that exists because the test found RLS doing nothing.
+
+    Postgres exempts SUPERUSER and BYPASSRLS roles from every policy,
+    unconditionally. The policies were correct, `FORCE ROW LEVEL SECURITY` was
+    set, and every one of them was being skipped — with nothing in the schema to
+    show for it.
+    """
+
+    def test_a_restricted_role_passes(self):
+        assert checks.check_rls_effective("complylayer_app", False, False).ok
+
+    def test_a_superuser_is_flagged(self):
+        result = checks.check_rls_effective("postgres", True, False)
+        assert not result.ok
+        assert "every policy is skipped" in result.detail
+        assert "decoration" in result.remediation
+
+    def test_bypassrls_is_flagged_too(self):
+        result = checks.check_rls_effective("app", False, True)
+        assert not result.ok
+        assert "BYPASSRLS" in result.detail
+
+    def test_it_warns_rather_than_failing_so_a_laptop_is_not_blocked(self):
+        """`--strict` is what a deploy pipeline runs, and there it is fatal."""
+        assert checks.check_rls_effective("postgres", True, False).fatal is False
+
+    def test_an_unreadable_role_is_reported(self):
+        result = checks.check_rls_effective(None, None, None, error=RuntimeError("denied"))
+        assert not result.ok
+        assert "denied" in result.detail

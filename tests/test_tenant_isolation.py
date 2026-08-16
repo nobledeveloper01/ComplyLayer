@@ -257,3 +257,127 @@ class TestEveryRouteIsCovered:
             "Add one before adding the route — isolation somebody remembers to write is "
             "isolation somebody forgets."
         )
+
+
+class TestRowLevelSecurity:
+    """Layer three (§8.1, D4). The one that is not application code.
+
+    Layers one and two are a key resolving to one tenant and a query layer that
+    scopes every read. Both are code somebody can forget to write on the view
+    they add in a hurry. This layer is the database refusing, and it is tested by
+    deliberately bypassing the layers above it.
+    """
+
+    @staticmethod
+    def as_app_role(tenant_id: str, sql: str):
+        """Run a query as the restricted application role.
+
+        Tests connect as the docker-compose superuser, and Postgres exempts a
+        superuser from every policy — so asserting RLS on that connection would
+        assert nothing. `SET LOCAL ROLE` drops to the non-superuser role a real
+        deployment uses, inside the transaction, which is the only way this test
+        can tell the difference between a policy that works and one that is
+        being skipped.
+        """
+        from django.db import connection
+
+        from complylayer.tenancy import tenant_scope
+
+        with tenant_scope(tenant_id):
+            with connection.cursor() as cursor:
+                cursor.execute("SET LOCAL ROLE complylayer_app")
+                cursor.execute(sql)
+                result = cursor.fetchall()
+                cursor.execute("RESET ROLE")
+        return result
+
+    def test_a_query_with_no_tenant_set_returns_nothing(self, owned_by_a):
+        """The safe direction. A forgotten scope produces an empty result rather
+        than an unscoped one."""
+        rows = self.as_app_role("", "SELECT count(*) FROM complylayer_rule")
+        assert rows[0][0] == 0
+
+    def test_a_raw_unscoped_query_sees_only_the_scoped_tenant(self, owned_by_a, tenant_b):
+        """Bypasses the ORM's tenant filter entirely — the case where somebody
+        writes raw SQL and forgets the WHERE clause."""
+        tenant_b_obj, _ = tenant_b
+
+        rows = self.as_app_role(tenant_b_obj.id, "SELECT count(*) FROM complylayer_rule")
+        assert rows[0][0] == 0, "tenant B ran an unfiltered query and saw tenant A's rules"
+
+        rows = self.as_app_role("tnt_alpha", "SELECT count(*) FROM complylayer_rule")
+        assert rows[0][0] == 1
+
+    def test_a_superuser_bypasses_every_policy(self, owned_by_a, tenant_b):
+        """Recorded because it is the failure mode, not an aside.
+
+        The policies are correct and Postgres skips them anyway. Nothing errors,
+        nothing warns, and `\\d complylayer_rule` shows a policy that is never
+        consulted. `complylayer_doctor` checks the connecting role precisely
+        because this is invisible from the schema.
+        """
+        from django.db import connection
+
+        tenant_b_obj, _ = tenant_b
+        from complylayer.tenancy import tenant_scope
+
+        with tenant_scope(tenant_b_obj.id):
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT rolsuper FROM pg_roles WHERE rolname = current_user")
+                assert cursor.fetchone()[0] is True, "this test assumes the superuser connection"
+                cursor.execute("SELECT count(*) FROM complylayer_rule")
+                assert cursor.fetchone()[0] == 1, (
+                    "a superuser saw another tenant's row, which is exactly the point"
+                )
+
+    def test_it_applies_to_the_table_owner_too(self, owned_by_a):
+        """FORCE, not just ENABLE.
+
+        An owner bypasses RLS unless it is forced, and in development the
+        application role usually *is* the owner. Relying on a non-owner role in
+        production is right, and relying on remembering it for every future
+        table is a control that holds until it doesn't.
+        """
+        from django.db import connection
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT relrowsecurity, relforcerowsecurity
+                FROM pg_class WHERE relname = 'complylayer_rule'
+                """
+            )
+            enabled, forced = cursor.fetchone()
+        assert enabled is True
+        assert forced is True, "an owner would bypass a policy that is enabled but not forced"
+
+    def test_every_tenant_scoped_table_carries_a_policy(self):
+        """A new tenant-scoped table without a policy is the gap this catches."""
+        # importlib because a module name starting with a digit is not a valid
+        # identifier, and migration files are named for their order.
+        import importlib
+
+        from django.db import connection
+
+        rls = importlib.import_module("complylayer.migrations.0005_row_level_security")
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT DISTINCT tablename FROM pg_policies WHERE schemaname='public'")
+            protected = {row[0] for row in cursor.fetchall()}
+
+        missing = set(rls.TENANT_SCOPED_TABLES) - protected
+        assert not missing, f"these tables have no row level security policy: {sorted(missing)}"
+
+    def test_the_setting_does_not_survive_the_transaction(self):
+        """SET LOCAL, never SET.
+
+        A session-scoped setting on a pooled connection outlives the request that
+        made it and is inherited by whoever borrows that connection next — the
+        exact cross-tenant read this layer exists to stop.
+        """
+        from complylayer.tenancy import current_tenant, tenant_scope
+
+        with tenant_scope("tnt_alpha"):
+            assert current_tenant() == "tnt_alpha"
+
+        assert current_tenant() is None, "the tenant leaked past its transaction"

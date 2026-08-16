@@ -18,6 +18,14 @@ from complylayer import checks
 class Command(BaseCommand):
     help = "Check that this deployment can actually meet ComplyLayer's contracts."
 
+    def add_arguments(self, parser) -> None:
+        parser.add_argument(
+            "--strict",
+            action="store_true",
+            help="Treat warnings as failures. Use this in a deploy pipeline: a warning that is "
+            "acceptable on a laptop is usually not acceptable in production.",
+        )
+
     def handle(self, *args, **options) -> None:
         results = [checks.check_python_version()]
         results.append(self._database())
@@ -25,6 +33,7 @@ class Command(BaseCommand):
         results.append(checks.check_redis(client.ping))
         results.append(self._clock_skew(client))
         results.append(self._audit_immutability())
+        results.append(self._row_level_security())
 
         width = max(len(r.name) for r in results)
         for r in results:
@@ -34,6 +43,10 @@ class Command(BaseCommand):
                 self.stdout.write(f"           {' ' * width}  -> {r.remediation}")
 
         failures, warnings = checks.summarise(results)
+        if options.get("strict"):
+            failures += warnings
+            warnings = 0
+
         self.stdout.write("")
         if failures:
             self.stdout.write(
@@ -67,6 +80,20 @@ class Command(BaseCommand):
         except Exception as exc:
             return checks.check_audit_immutability(None, error=exc)
         return checks.check_audit_immutability(names)
+
+    def _row_level_security(self) -> checks.CheckResult:
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = "
+                    "current_user"
+                )
+                row = cursor.fetchone()
+        except Exception as exc:
+            return checks.check_rls_effective(None, None, None, error=exc)
+        if row is None:
+            return checks.check_rls_effective(None, None, None, error=RuntimeError("no such role"))
+        return checks.check_rls_effective(row[0], row[1], row[2])
 
     def _redis_client(self) -> redis.Redis:
         return redis.Redis.from_url(settings.COMPLYLAYER["REDIS_URL"])
