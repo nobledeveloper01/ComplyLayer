@@ -1,0 +1,42 @@
+# Postgres and Redis for local development.
+#
+# Redis is in the same compose network as everything else, which is the point:
+# §11.1 requires it co-located with the decision workload, and a developer whose
+# local setup already reflects that will not be surprised by the doctor's
+# latency check in production.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: complylayer
+      POSTGRES_USER: complylayer
+      POSTGRES_PASSWORD: complylayer
+    ports:
+      # Overridable because a developer machine often already has a Postgres on
+      # 5432, and silently connecting to the wrong one is a bad afternoon.
+      - "${COMPLYLAYER_DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U complylayer"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    # Velocity state is deliberately not backed up (§11.7) — it is a rolling
+    # window that rebuilds naturally, and restoring a stale snapshot would
+    # produce wrong decisions, which is worse than briefly having none.
+    command: redis-server --save "" --appendonly no
+    ports:
+      - "${COMPLYLAYER_REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:

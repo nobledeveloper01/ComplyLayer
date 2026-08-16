@@ -9,15 +9,16 @@ themselves — no engineer, no pull request, no deploy.
 > The person who owns the regulatory risk should be able to change the control without filing a
 > ticket.
 
-<!-- phase: 0 -->
+<!-- phase: 1 -->
 
-## Status — phase 0, in progress
+## Status — phase 0 complete, phase 1 in progress
 
-Planning is complete and reviewed. No code yet. **Nothing here serves a decision.**
+The foundations are in and every gate is green. **Nothing here serves a decision yet** — the rules
+engine is phase 1 and the endpoint is phase 2.
 
 | Phase | | What it delivers |
 |---|---|---|
-| 0 | ⬜ | Foundations: tooling, CI gates, `doctor`, hello-world script |
+| 0 | ✅ | Foundations: tooling, CI gates, `doctor`, hello-world script |
 | 1 | ⬜ | The AST sandbox, escape corpus written first |
 | 2 | ⬜ | Interpreter, determinism, the decision endpoint |
 | 3 | ⬜ | Velocity counters and aggregate facts |
@@ -33,14 +34,43 @@ latency budget, and reproducible decisions.
 
 ## What works today
 
-Nothing yet. This section lists real, runnable capability only — if a decision cannot be served, it
-does not appear here.
+- **A four-step install**, counted and enforced. `scripts/hello-world.sh` runs every step a new user
+  runs and fails if the count exceeds its budget, so §6.1's ten-minute promise cannot drift a
+  convenient step at a time.
+- **`complylayer_doctor`** — a preflight for the failure modes that are silent. It checks the Python
+  version, that Postgres is 16 or newer, that Redis is close enough to fit the latency budget, and
+  that this host's clock agrees with Redis. That last one matters more than it looks: velocity
+  windows are trimmed by timestamp, so a drifting clock evaluates the wrong window and never errors.
+- **The `eval`/`exec` guard** from [ADR-0001](docs/adr/0001-ast-interpreter-not-eval.md), in CI and
+  in a pre-commit hook. It tokenises rather than greps, so it catches a real call and ignores the
+  same word in a comment or a docstring — the DSL validator will document why `eval` is forbidden,
+  and a gate that fails on its own rationale is a gate somebody disables.
+- **CI**: five jobs, sandbox checks first. Lint, format, the 90% coverage gate (currently 100%),
+  `bandit`, `semgrep`, `pip-audit`, `gitleaks`, and a check that the README has not fallen behind.
 
 ## Try it
 
-Nothing to run yet. From phase 0 this section carries the shortest command sequence that
-demonstrates the most recent phase, and every command in it is executed before that phase is called
-done.
+```bash
+git clone https://github.com/nobledeveloper01/ComplyLayer && cd ComplyLayer
+cp .env.example .env          # only needed if 5432 or 6379 are taken on your machine
+./scripts/hello-world.sh
+```
+
+That installs Python 3.12 and every dependency, starts Postgres and Redis, creates the schema, and
+preflights the deployment. A healthy run ends like this:
+
+```
+[  ok  ] python version  running 3.12, expected 3.12
+[  ok  ] database        Postgres 16 (need 16+)
+[  ok  ] redis           round trip 0.25 ms
+[  ok  ] clock skew      0.002 s between this host and Redis
+```
+
+To run the gates yourself:
+
+```bash
+make ci
+```
 
 ## Documents
 

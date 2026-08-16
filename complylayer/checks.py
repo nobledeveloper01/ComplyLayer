@@ -1,0 +1,181 @@
+"""Preflight checks behind ``manage.py complylayer_doctor``.
+
+The checks exist because the failure modes that matter most in this product are
+silent. A self-hosted deployment with Redis in another availability zone will
+serve correct decisions and miss its latency SLA; a host whose clock has drifted
+will evaluate velocity windows against the wrong instant and nothing will error.
+Both should be found during installation, not during an incident.
+
+One check per failure mode, and the roadmap adds a check per phase. Each returns
+a result carrying its own remediation, because a preflight that reports a problem
+without saying what to do about it has only moved the confusion.
+
+Every check takes its dependencies as arguments rather than reaching for globals,
+so they are testable without a live Postgres or Redis.
+"""
+
+from __future__ import annotations
+
+import sys
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from statistics import median
+
+# Redis sits inside the 15 ms fact-gathering budget (see docs/plan-architecture.md).
+# A single PING is one round trip with no work attached, so it should be far
+# under that. Above the warn threshold the deployment is probably crossing an
+# availability zone; above the fail threshold the latency contract is unmeetable.
+REDIS_PING_WARN_MS = 2.0
+REDIS_PING_FAIL_MS = 10.0
+
+# Velocity windows are computed against wall-clock time. A host a second adrift
+# trims the wrong members from a sorted set, and nothing anywhere reports an error.
+CLOCK_SKEW_FAIL_SECONDS = 1.0
+
+MIN_POSTGRES_VERSION = 16
+
+
+@dataclass(frozen=True)
+class CheckResult:
+    """The outcome of one preflight check."""
+
+    name: str
+    ok: bool
+    detail: str
+    remediation: str = ""
+    fatal: bool = True
+
+    @property
+    def status(self) -> str:
+        if self.ok:
+            return "ok"
+        return "FAIL" if self.fatal else "warn"
+
+
+def check_python_version(version_info: tuple[int, int] | None = None) -> CheckResult:
+    """The project pins 3.12; running on anything else is unsupported, not merely untested."""
+    major, minor = version_info or sys.version_info[:2]
+    ok = (major, minor) == (3, 12)
+    return CheckResult(
+        name="python version",
+        ok=ok,
+        detail=f"running {major}.{minor}, expected 3.12",
+        remediation="" if ok else "Install Python 3.12 (`uv python install 3.12`) and re-sync.",
+    )
+
+
+def check_database(server_version: int | None, error: Exception | None = None) -> CheckResult:
+    """Postgres must be reachable and recent enough for the features the schema relies on.
+
+    ``server_version`` is Django's integer form, e.g. 160004 for 16.4.
+    """
+    if error is not None:
+        return CheckResult(
+            name="database",
+            ok=False,
+            detail=f"could not connect: {error}",
+            remediation="Check COMPLYLAYER_DATABASE_URL, and that Postgres is running.",
+        )
+    if server_version is None:
+        return CheckResult(
+            name="database",
+            ok=False,
+            detail="connected but the server version could not be read",
+            remediation="Unexpected. Check the connecting role has permission to read settings.",
+        )
+
+    major = server_version // 10000
+    ok = major >= MIN_POSTGRES_VERSION
+    return CheckResult(
+        name="database",
+        ok=ok,
+        detail=f"Postgres {major} (need {MIN_POSTGRES_VERSION}+)",
+        remediation=""
+        if ok
+        else f"Upgrade to Postgres {MIN_POSTGRES_VERSION}+. Declarative partitioning on the "
+        "decisions table and row level security both depend on it.",
+    )
+
+
+def check_redis(
+    ping: Callable[[], object],
+    clock: Callable[[], float] = time.perf_counter,
+    samples: int = 5,
+) -> CheckResult:
+    """Redis must be reachable, and close enough that the latency budget survives.
+
+    The first ping is thrown away. It carries TCP connection setup, which on a
+    laptop running Docker can be several milliseconds and has nothing to do with
+    how far away Redis is. Reporting it would send somebody hunting a network
+    problem they do not have — and the decision path reuses a pooled connection,
+    so steady state is what the budget actually spends.
+
+    The median of the remaining samples, rather than the mean, so one scheduler
+    hiccup does not decide the answer.
+    """
+    try:
+        ping()  # warm-up, deliberately unmeasured
+        timings = []
+        for _ in range(samples):
+            start = clock()
+            ping()
+            timings.append((clock() - start) * 1000)
+    except Exception as exc:
+        return CheckResult(
+            name="redis",
+            ok=False,
+            detail=f"could not connect: {exc}",
+            remediation="Check COMPLYLAYER_REDIS_URL, and that Redis is running.",
+        )
+    elapsed_ms = median(timings)
+
+    if elapsed_ms >= REDIS_PING_FAIL_MS:
+        return CheckResult(
+            name="redis",
+            ok=False,
+            detail=f"round trip {elapsed_ms:.2f} ms (limit {REDIS_PING_FAIL_MS:.0f} ms)",
+            remediation="Redis is too far away to meet the 100 ms p99 contract. Co-locate it in "
+            "the same availability zone as the decision workload.",
+        )
+    if elapsed_ms >= REDIS_PING_WARN_MS:
+        return CheckResult(
+            name="redis",
+            ok=False,
+            fatal=False,
+            detail=f"round trip {elapsed_ms:.2f} ms (want under {REDIS_PING_WARN_MS:.0f} ms)",
+            remediation="Slower than expected for a co-located Redis. Worth confirming it is in "
+            "the same zone before the latency work in phase 4.",
+        )
+    return CheckResult(name="redis", ok=True, detail=f"round trip {elapsed_ms:.2f} ms")
+
+
+def check_clock_skew(redis_time_seconds: float | None, local_time_seconds: float) -> CheckResult:
+    """Compare the local clock against Redis, which is the clock velocity windows are trimmed by."""
+    if redis_time_seconds is None:
+        return CheckResult(
+            name="clock skew",
+            ok=False,
+            fatal=False,
+            detail="could not read the Redis server time",
+            remediation="Not fatal, but velocity windows depend on these clocks agreeing.",
+        )
+
+    skew = abs(local_time_seconds - redis_time_seconds)
+    ok = skew < CLOCK_SKEW_FAIL_SECONDS
+    return CheckResult(
+        name="clock skew",
+        ok=ok,
+        detail=f"{skew:.3f} s between this host and Redis",
+        remediation=""
+        if ok
+        else "Enable NTP on this host. Velocity windows are trimmed by timestamp, so a drifting "
+        "clock silently evaluates the wrong window and never raises an error.",
+    )
+
+
+def summarise(results: list[CheckResult]) -> tuple[int, int]:
+    """Return (failures, warnings). The exit code is the count of fatal failures."""
+    failures = sum(1 for r in results if not r.ok and r.fatal)
+    warnings = sum(1 for r in results if not r.ok and not r.fatal)
+    return failures, warnings

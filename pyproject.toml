@@ -1,0 +1,117 @@
+[project]
+name = "complylayer"
+version = "0.0.0"
+description = "Pluggable compliance rules and decision engine for fintechs"
+readme = "README.md"
+requires-python = "==3.12.*"
+license = { text = "UNLICENSED" }
+authors = [{ name = "ComplyLayer" }]
+keywords = ["compliance", "fintech", "aml", "kyc", "rules-engine"]
+
+dependencies = [
+    "django>=5.0,<6.0",
+    "psycopg[binary]>=3.2",
+    "redis>=5.2",
+    "orjson>=3.10",
+    "argon2-cffi>=23.1",
+]
+
+[project.urls]
+Repository = "https://github.com/nobledeveloper01/ComplyLayer"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-django>=4.9",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "bandit>=1.8",
+    "pip-audit>=2.7",
+    "semgrep>=1.100",
+    "pre-commit>=4.0",
+    # Phase 1 needs it for the DSL property tests; installed now so the lock
+    # file does not churn the moment the sandbox work starts.
+    "hypothesis>=6.122",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["complylayer"]
+
+# ---------------------------------------------------------------------------
+# Lint and format
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["migrations"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # import sorting
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "S",         # bandit-alikes, so the obvious ones fail at lint speed
+    "DTZ",       # naive datetimes — a compliance product cannot afford them
+    "T20",       # no stray print()
+    "RUF",
+]
+ignore = [
+    "S101",      # assert is how the tests are written
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The escape corpus is deliberately full of hostile strings.
+"tests/test_dsl_escapes.py" = ["S", "E501"]
+# The doctor and the standalone scripts print for a living.
+"complylayer/management/commands/*" = ["T20"]
+"scripts/*" = ["T20"]
+# Tests shell out to the guard scripts on purpose, with arguments they construct
+# themselves.
+"tests/*" = ["S603"]
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "server.settings"
+testpaths = ["tests"]
+# The guard scripts live outside the package but are still tested like code.
+pythonpath = ["scripts"]
+addopts = "-q --strict-markers"
+markers = [
+    # Anything needing a live Postgres or Redis. `make test` excludes these so
+    # a clean checkout can run the suite without docker; `make test-integration`
+    # includes them.
+    "integration: requires Postgres and Redis",
+]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["complylayer"]
+branch = true
+omit = ["*/migrations/*"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+# ---------------------------------------------------------------------------
+# Security
+# ---------------------------------------------------------------------------
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]

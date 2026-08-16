@@ -1,0 +1,81 @@
+"""Standalone Django project wrapping the ComplyLayer app.
+
+Phase 0 keeps this deliberately small. The split into separate decision and
+management settings modules (D7 in docs/plan-architecture.md) arrives with the
+decision endpoint in phase 2 — a decision worker will not load the management
+URLconf at all, so a rule-management endpoint is not merely forbidden there, it
+does not exist.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _env(name: str, default: str) -> str:
+    return os.environ.get(name, default)
+
+
+# No usable default: a deployment that forgets to set this should fail loudly at
+# start rather than run on a key baked into a public repository.
+SECRET_KEY = _env("COMPLYLAYER_SECRET_KEY", "insecure-development-key-do-not-deploy")
+DEBUG = _env("COMPLYLAYER_DEBUG", "0") == "1"
+ALLOWED_HOSTS = [
+    h for h in _env("COMPLYLAYER_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h
+]
+
+INSTALLED_APPS = [
+    "django.contrib.contenttypes",
+    "django.contrib.auth",
+    "complylayer",
+]
+
+MIDDLEWARE = [
+    "django.middleware.security.SecurityMiddleware",
+    "django.middleware.common.CommonMiddleware",
+]
+
+ROOT_URLCONF = "server.urls"
+WSGI_APPLICATION = "server.wsgi.application"
+ASGI_APPLICATION = "server.asgi.application"
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": _env("COMPLYLAYER_DB_NAME", "complylayer"),
+        "USER": _env("COMPLYLAYER_DB_USER", "complylayer"),
+        "PASSWORD": _env("COMPLYLAYER_DB_PASSWORD", "complylayer"),
+        "HOST": _env("COMPLYLAYER_DB_HOST", "127.0.0.1"),
+        "PORT": _env("COMPLYLAYER_DB_PORT", "5432"),
+        # Transaction-mode pooling is what makes `SET LOCAL` safe for row level
+        # security (D4). Persistent connections are set up in phase 5 alongside it.
+        "CONN_MAX_AGE": 0,
+    }
+}
+
+# Per §6.2. Every value here is a contract with the deployment, so each is
+# explicit rather than inferred.
+COMPLYLAYER = {
+    "REDIS_URL": _env("COMPLYLAYER_REDIS_URL", "redis://127.0.0.1:6379/2"),
+    # No default fallback anywhere in this product. §10.3 sets the per-severity
+    # defaults; a tenant may override, but never implicitly.
+    "DEFAULT_FALLBACK": {"block": "closed", "flag": "open"},
+    "MAX_EVAL_STEPS": 1000,
+    "MAX_RULE_NODES": 200,
+    "MAX_RULE_SOURCE_CHARS": 2000,
+    "DECISION_TIMEOUT_MS": 150,
+}
+
+USE_TZ = True
+TIME_ZONE = "UTC"
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "root": {"handlers": ["console"], "level": _env("COMPLYLAYER_LOG_LEVEL", "INFO")},
+}

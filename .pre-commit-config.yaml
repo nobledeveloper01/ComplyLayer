@@ -1,0 +1,39 @@
+# Cheap checks that run before a commit exists, so the expensive ones in CI are
+# not the first place a problem is noticed.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: detect-private-key
+
+  - repo: local
+    hooks:
+      - id: no-eval-guard
+        name: eval/exec guard (ADR-0001)
+        entry: uv run python scripts/no_eval_guard.py
+        language: system
+        pass_filenames: false
+        files: ^complylayer/.*\.py$
+
+      - id: readme-phase
+        name: README is current with PHASE
+        entry: ./scripts/check-readme-phase.sh
+        language: system
+        pass_filenames: false
