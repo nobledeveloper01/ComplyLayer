@@ -177,6 +177,28 @@ class IdempotencyRecord(models.Model):
         ]
 
 
+class NamedList(models.Model):
+    """A tenant-configured list a rule can refer to by name.
+
+    Versioned into the rule set snapshot rather than read live (D11). A rule
+    reading `in_list(destination_country, high_risk_countries)` depends on this,
+    so editing it has to publish a new version — otherwise two decisions
+    recording the same version would not represent the same control.
+    """
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="lists")
+    name = models.CharField(max_length=64)
+    values = models.JSONField(default=list)
+    updated_by = models.CharField(max_length=64)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "complylayer_namedlist"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "name"], name="named_list_per_tenant")
+        ]
+
+
 class AuditRecord(models.Model):
     """Append-only, hash-chained. The grants and trigger that enforce that arrive
     with the management API in phase 5; the shape is fixed here so nothing has to
