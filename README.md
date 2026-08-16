@@ -9,21 +9,22 @@ themselves — no engineer, no pull request, no deploy.
 > The person who owns the regulatory risk should be able to change the control without filing a
 > ticket.
 
-<!-- phase: 3 -->
+<!-- phase: 4 -->
 
-## Status — phase 2 complete, phase 3 in progress
+## Status — phase 3 complete, phase 4 in progress
 
-**It serves decisions.** `POST /v1/decisions` returns `allow`, `flag` or `block` against a versioned
-rule set, with the matched rules, the reason, and a decision that reproduces exactly when replayed.
-Velocity counters are the missing piece: the interface is there, backed by an in-memory
-implementation, and phase 3 puts Redis behind it.
+**It serves decisions, and velocity rules work.** `POST /v1/decisions` returns `allow`, `flag` or
+`block` against a versioned rule set, counting a customer's rolling windows out of Redis in a single
+round trip. A hundred concurrent transactions against a threshold of five let exactly five through,
+fifty runs in a row. The rule set is still passed in rather than cached and versioned — phase 4 does
+that, and puts the latency contract into CI.
 
 | Phase | | What it delivers |
 |---|---|---|
 | 0 | ✅ | Foundations: tooling, CI gates, `doctor`, hello-world script |
 | 1 | ✅ | The AST sandbox, escape corpus written first |
 | 2 | ✅ | Interpreter, determinism, the decision endpoint |
-| 3 | ⬜ | Velocity counters and aggregate facts |
+| 3 | ✅ | Velocity counters and aggregate facts |
 | 4 | ⬜ | Rule cache, versioning, the latency contract |
 | 5 | ⬜ | Management API, approval workflow, tenancy |
 | 6 | ⬜ | The dashboard and rule builder |
@@ -36,6 +37,11 @@ latency budget, and reproducible decisions.
 
 ## What works today
 
+- **Velocity rules that hold under concurrency.** A customer's rolling windows and their lifetime
+  aggregates come out of Redis in one round trip, and the write is part of it — so a hundred
+  simultaneous transactions against a "no more than five an hour" rule let exactly five through,
+  every time. Windows count *attempts*, blocked ones included, because eleven transfers just under
+  the reporting threshold with six declined is still structuring.
 - **The decision endpoint.** `POST /v1/decisions` evaluates a versioned rule set and answers in
   under half a millisecond for 100 rules. Idempotent: a retry returns the original decision
   verbatim, timestamp included. Unknown fields are refused rather than ignored, so a payload

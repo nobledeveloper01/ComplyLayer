@@ -60,15 +60,10 @@ class DecisionHandler:
 
     def decide(self, transaction: Transaction, idempotency_key: str) -> dict[str, Any]:
         now = datetime.now(UTC)
-        facts = self.build_facts(transaction, now)
+        customer_hash = hash_customer_ref(transaction.customer_ref, self.salt)
+        fallback = self.store.fallback_policy(self.tenant_id)
 
-        context = EvaluationContext(
-            facts=facts,
-            functions=functions.build(self.velocity, now),
-        )
-        decision = decide(
-            self.ruleset, context, fallback=self.store.fallback_policy(self.tenant_id)
-        )
+        decision, facts = self._evaluate(transaction, now, customer_hash, fallback)
 
         body: dict[str, Any] = {
             "decision_id": new_decision_id(),
@@ -100,6 +95,32 @@ class DecisionHandler:
         body["_resolved_facts"] = _serialisable(facts)
         return body
 
+    def _evaluate(self, transaction, now, customer_hash, fallback):
+        """Gather and evaluate.
+
+        The window is fetched with this transaction already in it, atomically —
+        see complylayer/velocity/redis_store.py for why that replaced the lock
+        D2 originally called for. The upshot here is that there is no second
+        evaluation pass and no lock to acquire: one round trip, one evaluation.
+        """
+        # The window is fetched first, because build_facts reads the aggregates
+        # it returns.
+        self._gather(transaction, now)
+        facts = self.build_facts(transaction, now)
+        context = EvaluationContext(facts=facts, functions=functions.build(self.velocity, now))
+        return decide(self.ruleset, context, fallback=fallback), facts
+
+    def _gather(self, transaction: Transaction, now: datetime) -> None:
+        """The write path (D9). Windows count attempts, blocked ones included."""
+        gather = getattr(self.velocity, "record_and_gather", None)
+        if gather is not None:
+            gather(
+                transaction.transaction_ref,
+                transaction.amount_minor,
+                transaction.transaction_type,
+                now.timestamp(),
+            )
+
     def build_facts(self, transaction: Transaction, now: datetime) -> dict[str, Any]:
         """The entire namespace a rule can see for this transaction.
 
@@ -120,6 +141,12 @@ class DecisionHandler:
             facts[f"destination_{key}"] = value
         for key, value in transaction.device.items():
             facts[f"device_{key}"] = value
+
+        # Aggregate facts about the customer's history, from the same fetch as
+        # the rolling window — no second round trip.
+        aggregates = getattr(self.velocity, "aggregate_facts", None)
+        if aggregates is not None:
+            facts.update(aggregates())
 
         # Named lists come from the frozen snapshot, not from live configuration
         # (D11) — editing a list has to publish a new version, or two decisions

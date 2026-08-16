@@ -58,22 +58,40 @@ decision, and that is already prevented by `unique_together = [('tenant', 'idemp
 `Decision`: the second writer loses the insert and reads the winner's row. No distributed lock is
 needed for idempotency, and adding one would cost more than the problem does.
 
-**Decision, part three — the block-rule lock is paid on the rare path only.** Locking every decision
-that touches a velocity function would put ~5 ms on the median. Instead:
+**Decision, part three — superseded in phase 3. There is no lock.**
 
-1. Evaluate unlocked.
-2. If, and only if, a `block`-severity rule's velocity comparison landed inside the race window —
-   the observed count is within one of its threshold — re-evaluate that single rule under a
-   per-customer Redis lock.
-3. Record `locked: true` on the decision so the rate of step 2 is observable.
+The original decision here, following §4.5, was a short per-customer lock taken only when a
+`block`-severity rule's velocity count landed within one of its threshold, on the reasoning that
+away from the boundary the answer is the same either way and the ~5 ms is not worth paying.
 
-The race the lock exists to prevent is precisely two transactions straddling a threshold boundary.
-Away from the boundary the lock changes nothing, so it is not taken. Expected hit rate is under 1%
-of decisions touching block velocity rules; the alert fires if it exceeds 5%, because that means a
-threshold is badly tuned rather than the mechanism being wrong.
+**The concurrency test disproved it on the first run: 11 transactions passed a threshold of 5.**
 
-**Consequence.** A decision that takes the lock costs roughly 30 ms rather than 25 ms. That is
-inside p99 and nowhere near p50, which is where the specification's tighter 20 ms target lives.
+The flaw is that "near the boundary" is measured against what *this* decision read, and with
+concurrent writers a read is arbitrarily stale. Sixteen threads can each observe a count of zero and
+each write. A lock that engages at the boundary cannot close a race that begins long before the
+boundary is anywhere in sight.
+
+**The replacement is simpler, faster and exact.** The read and the write became one atomic operation:
+`record_and_gather` adds this transaction and returns the resulting window inside a single
+MULTI/EXEC. Redis serialises them, so every concurrent decision gets a distinct, consistent count.
+
+| | Lock, as designed | Atomic record-and-read |
+|---|---|---|
+| Round trips | 2 (gather, then gather again under lock) | 1 |
+| Extra latency at a boundary | ~5 ms plus a second evaluation | none |
+| Exact for `block` rules | no, as measured | yes |
+| Exact for `flag` rules | no, accepted as a trade | yes, for free |
+
+The window now includes the transaction being decided, which is the natural reading of "more than
+five transfers in an hour" anyway: the sixth one is the one that trips it.
+
+**The trade §4.5 made no longer has to be made.** It accepted imprecision for `flag` rules as the
+price of not locking. With no lock to avoid, that price is not owed, and a reviewer's queue is not
+padded with transactions that only appear to have crossed a threshold.
+
+**What this cost to learn:** the lock, the per-comparison boundary detection in the interpreter, and
+the `needs_boundary_lock` signal through the engine were all built before the test ran, and all
+deleted after. Cheaper than shipping it.
 
 ---
 
