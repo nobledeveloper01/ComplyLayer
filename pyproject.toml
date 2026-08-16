@@ -33,6 +33,7 @@ dev = [
     # Phase 1 needs it for the DSL property tests; installed now so the lock
     # file does not churn the moment the sandbox work starts.
     "hypothesis>=6.122",
+    "pyyaml>=6.0",
 ]
 
 [build-system]

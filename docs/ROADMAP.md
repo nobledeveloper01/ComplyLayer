@@ -296,8 +296,9 @@ engine is.
 - PyPI packaging for `complylayer` and npm for `@complylayer/node`, released from one tag
 - Docker compose self-host. The Helm chart follows in v1.1 with the hosted product, since it deploys
   workloads that v1 does not separate
-- `openapi.yaml` **published**, not written — it grew one endpoint at a time from phase 2 onward,
-  which is what the Definition of Done already required. Runbooks, ADRs, README
+- `openapi.yaml` **published**, not written — it grew one endpoint at a time from phase 5 onward,
+  which is what the Definition of Done already required, and `tests/test_openapi.py` fails if it
+  falls behind the URLconf. Runbooks, ADRs, README
 
 **Exit gate**
 - 2,000 decisions/sec sustained, p99 under 100 ms

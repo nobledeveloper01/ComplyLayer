@@ -1,0 +1,812 @@
+openapi: 3.1.0
+
+info:
+  title: ComplyLayer
+  version: 0.0.0
+  summary: Real-time compliance decisions for fintechs.
+  description: |
+    Two surfaces, deliberately separate.
+
+    **The decision API** is what sits on your transaction path. One call, one
+    answer, under 100 ms at p99. It is the only endpoint with a latency contract
+    and the only one you will call at volume.
+
+    **The management API** is everything else: authoring rules, approving them,
+    reading decisions, running reports. It has no latency contract, and it runs
+    on separate workers — a decision worker has no route to rule management at
+    all, so a heavy report cannot starve the endpoint deciding whether money
+    moves.
+
+    Two things about this API differ from what you may expect, both on purpose:
+
+    - **`Idempotency-Key` is required on every decision.** An optional header
+      means the guarantee silently does not apply to whoever left it out, and the
+      retry that needed it is the one nobody is watching.
+    - **Unknown fields are rejected, not ignored.** A payload carrying a card
+      number fails rather than being stored and redacted. We cannot leak what we
+      never collected.
+
+  contact:
+    name: ComplyLayer
+    url: https://github.com/nobledeveloper01/ComplyLayer
+  license:
+    name: To be decided
+
+servers:
+  - url: https://api.complylayer.dev
+    description: Hosted
+  - url: http://localhost:8000
+    description: Self-hosted
+
+security:
+  - apiKey: []
+
+tags:
+  - name: Decisions
+    description: The endpoint on your transaction path.
+  - name: Rules
+    description: Authoring, approval and activation.
+  - name: Rule sets
+    description: Immutable snapshots. A decision references a version, not a rule.
+  - name: Lists
+    description: Named lists a rule can refer to.
+  - name: Operations
+    description: Probes and metrics. No authentication.
+
+paths:
+  /v1/decisions:
+    post:
+      tags: [Decisions]
+      operationId: createDecision
+      summary: Decide whether a transaction may proceed
+      description: |
+        Returns `allow`, `flag` or `block`.
+
+        `flag` means proceed — the transaction is already in the compliance
+        review queue. Only `block` should stop you, and it carries a
+        `customer_message` written by the compliance team rather than by an
+        engineer.
+
+        The window a velocity rule counts **includes this transaction**, which is
+        the natural reading of "more than five transfers in an hour": the sixth
+        one is the one that trips it. Attempts count, including blocked ones —
+        eleven transfers just under a reporting threshold with six declined is
+        still structuring.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, maxLength: 128 }
+          description: |
+            Required. A retry with the same key returns the original decision
+            verbatim, including its original timestamp. Use your transaction
+            reference.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionRequest' }
+      responses:
+        '200':
+          description: A decision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Decision' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413':
+          description: The request body is larger than 16 KB.
+        '429':
+          description: |
+            Rate limited. Retry after the interval in `Retry-After`. Backpressure
+            is explicit rather than silent queueing.
+
+  /v1/rules:
+    get:
+      tags: [Rules]
+      operationId: listRules
+      summary: List rules
+      parameters:
+        - { name: state, in: query, schema: { $ref: '#/components/schemas/RuleState' } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: A page of rules.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedRules' }
+    post:
+      tags: [Rules]
+      operationId: createRule
+      summary: Create a rule, always as a draft
+      description: |
+        Nothing is born active. A rule goes draft → approved → active, and the
+        author cannot approve their own change.
+
+        Requires the `compliance_analyst`, `compliance_officer` or `risk_manager`
+        role. An engineer cannot create a compliance rule; that is the point of
+        the product rather than an oversight in the permission table.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RuleInput' }
+      responses:
+        '201':
+          description: The draft.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rule' }
+        '400': { $ref: '#/components/responses/InvalidRule' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v1/rules/validate:
+    post:
+      tags: [Rules]
+      operationId: validateRule
+      summary: Check a rule without saving it
+      description: |
+        What the rule builder calls as you type. Accepts either an expression or
+        the builder's structured form and returns the same errors for both — a
+        rule built in the UI earns no leniency a typed one would not get.
+
+        Errors name the problem and the fix in a compliance officer's language,
+        not a parser's.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expression: { type: string, maxLength: 2000 }
+                structured:
+                  type: object
+                  description: The builder's JSON form. Rendered to an expression, then validated.
+      responses:
+        '200':
+          description: The rule is valid.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean, const: true }
+                  expression: { type: string }
+        '400': { $ref: '#/components/responses/InvalidRule' }
+
+  /v1/rules/{ruleId}:
+    parameters:
+      - { name: ruleId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Rules]
+      operationId: getRule
+      summary: Read a rule
+      responses:
+        '200':
+          description: The rule.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rule' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Rules]
+      operationId: updateRule
+      summary: Edit a draft
+      description: |
+        **Editing a rule that has been approved clears the approval.** Otherwise
+        the workflow is theatre: get something harmless approved, then change it.
+
+        An active rule cannot be edited in place. Archive it and create a new one,
+        so the change is visible in the trail.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RuleInput' }
+      responses:
+        '200':
+          description: The updated rule.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rule' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+    delete:
+      tags: [Rules]
+      operationId: archiveRule
+      summary: Archive a rule
+      description: |
+        There is no delete. A rule that once decided something is evidence, so it
+        is archived and stays in the trail.
+      responses:
+        '204': { description: Archived. }
+
+  /v1/rules/{ruleId}/request-approval:
+    parameters:
+      - { name: ruleId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Rules]
+      operationId: requestApproval
+      summary: Send a rule for approval
+      responses:
+        '200':
+          description: The rule.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rule' }
+
+  /v1/rules/{ruleId}/approve:
+    parameters:
+      - { name: ruleId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Rules]
+      operationId: approveRule
+      summary: Approve someone else's change
+      description: |
+        Never your own, whatever your role. Approval exists so that no single
+        person can weaken a control alone, and a role that can author and approve
+        is a role that can do exactly that.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: The approved rule.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rule' }
+        '403':
+          description: |
+            Refused. Either your role cannot approve, or you are the author.
+
+  /v1/rules/{ruleId}/shadow:
+    parameters:
+      - { name: ruleId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Rules]
+      operationId: shadowRule
+      summary: Evaluate in production without affecting anyone
+      description: |
+        A shadow rule is evaluated and recorded on every decision and never
+        influences the outcome. Watch it for a week before you trust it.
+      responses:
+        '200':
+          description: The rule.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rule' }
+
+  /v1/rules/{ruleId}/activate:
+    parameters:
+      - { name: ruleId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Rules]
+      operationId: activateRule
+      summary: Put a rule in force
+      description: |
+        Publishes a new rule set version containing every active and shadow rule,
+        plus every named list. Decisions reference the version, which is what
+        makes them reproducible after the rules have moved on.
+
+        Activating without an approval requires `emergency_reason`, is restricted
+        to `risk_manager`, and pages the risk lead. A control changed outside the
+        approval workflow is the event nobody should be able to bury.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                emergency_reason:
+                  type: string
+                  description: Required only when activating without an approval.
+      responses:
+        '200':
+          description: The rule, and the version now in force.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Rule'
+                  - type: object
+                    properties:
+                      ruleset_version: { type: integer }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+
+  /v1/rules/{ruleId}/archive:
+    parameters:
+      - { name: ruleId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Rules]
+      operationId: archiveRuleAction
+      summary: Take a rule out of force
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: The rule, and the version now in force.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rule' }
+
+  /v1/rulesets:
+    get:
+      tags: [Rule sets]
+      operationId: listRuleSets
+      summary: List published versions
+      responses:
+        '200':
+          description: A page of versions, newest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedRuleSets' }
+    post:
+      tags: [Rule sets]
+      operationId: revertRuleSet
+      summary: Revert to an earlier version
+      description: |
+        Publishes a **new** version whose content equals an older one. Forward,
+        never backward: a version somebody's decision references is not a thing
+        that may be deleted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revert_to]
+              properties:
+                revert_to: { type: integer }
+      responses:
+        '201':
+          description: The new version.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RuleSetVersion' }
+
+  /v1/rulesets/{version}:
+    parameters:
+      - { name: version, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [Rule sets]
+      operationId: getRuleSet
+      summary: Read an immutable snapshot
+      responses:
+        '200':
+          description: The snapshot.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RuleSetVersion' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/decisions/{decisionId}:
+    parameters:
+      - { name: decisionId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Decisions]
+      operationId: getDecision
+      summary: Read a stored decision
+      description: |
+        Includes the input as received **and** every fact as resolved at the
+        time. The resolved facts are what make a replay a reproduction rather
+        than a re-evaluation against a window that has since moved on.
+      responses:
+        '200':
+          description: The decision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StoredDecision' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/decisions/{decisionId}/review:
+    parameters:
+      - { name: decisionId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Decisions]
+      operationId: reviewDecision
+      summary: Record a review outcome
+      description: |
+        The outcome feeds per-rule false-positive analytics, which is how a rule
+        that flags too much becomes visible rather than merely annoying.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [cleared, confirmed] }
+                notes: { type: string }
+      responses:
+        '200':
+          description: The reviewed decision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StoredDecision' }
+
+  /v1/lists:
+    get:
+      tags: [Lists]
+      operationId: listNamedLists
+      summary: List named lists
+      responses:
+        '200':
+          description: A page of lists.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedLists' }
+    post:
+      tags: [Lists]
+      operationId: createNamedList
+      summary: Create a named list
+      description: |
+        Creating or editing a list **publishes a new rule set version**. A rule
+        reading `in_list(destination_country, high_risk_countries)` depends on
+        this list, so leaving it outside the snapshot would let an edit change
+        decisions without changing the version — and two decisions recording the
+        same version would no longer mean the same control.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NamedList' }
+      responses:
+        '201':
+          description: The list.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NamedList' }
+
+  /v1/lists/{listId}:
+    parameters:
+      - { name: listId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Lists]
+      operationId: getNamedList
+      summary: Read a named list
+      responses:
+        '200':
+          description: The list.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NamedList' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Lists]
+      operationId: replaceNamedList
+      summary: Replace a named list
+      responses:
+        '200':
+          description: The list.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NamedList' }
+    patch:
+      tags: [Lists]
+      operationId: updateNamedList
+      summary: Update a named list
+      responses:
+        '200':
+          description: The list.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NamedList' }
+    delete:
+      tags: [Lists]
+      operationId: deleteNamedList
+      summary: Delete a named list
+      responses:
+        '204': { description: Deleted. }
+
+  /healthz:
+    get:
+      tags: [Operations]
+      operationId: healthz
+      summary: Liveness
+      description: |
+        Does not touch Postgres, Redis or the rule cache. A liveness probe that
+        checks dependencies restarts the process when a dependency is down, which
+        turns one outage into two.
+      security: []
+      responses:
+        '200': { description: Alive. }
+
+  /readyz:
+    get:
+      tags: [Operations]
+      operationId: readyz
+      summary: Readiness
+      description: |
+        503 until this worker has compiled its rule set. A worker reporting ready
+        before its cache is warm produces a latency spike on every deploy.
+      security: []
+      responses:
+        '200': { description: Ready to serve decisions. }
+        '503': { description: Still compiling the rule set. }
+
+  /metrics:
+    get:
+      tags: [Operations]
+      operationId: metrics
+      summary: Prometheus metrics
+      description: |
+        Every series is labelled by **worker**, not by pod.
+        `complylayer_ruleset_version` exists to catch one worker serving
+        decisions from a rule set that was retired last week — and labelled per
+        pod, four disagreeing workers look like one healthy value.
+      security: []
+      responses:
+        '200':
+          description: Metrics in Prometheus text format.
+          content:
+            text/plain: {}
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: |
+        `Authorization: Bearer cl_live_...`
+
+        A key resolves to exactly one tenant. No key spans tenants. Keys are
+        scoped per environment, so a leaked `cl_test_` key can do nothing to live
+        data, and per role, so a key issued for an integration cannot activate a
+        rule.
+
+        Rotation uses overlapping validity: issue a new key, both work, then
+        revoke the old one. Rotation never needs downtime.
+
+  responses:
+    BadRequest:
+      description: The request was not understood.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: |
+        The key is missing, unknown, revoked or wrong. Deliberately one message
+        for all four — distinguishing them would tell somebody probing which
+        guess was closer.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Your role does not permit this, or you are the author.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: |
+        No such object. Also returned for an object belonging to another tenant —
+        a 403 would confirm it exists, which is itself a leak.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidTransition:
+      description: The rule is not in a state that allows this.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidRule:
+      description: The expression is not a valid rule.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/RuleError' }
+
+  schemas:
+    DecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [transaction_ref, customer_ref, amount_minor, currency]
+      properties:
+        transaction_ref: { type: string, maxLength: 128 }
+        customer_ref:
+          type: string
+          maxLength: 128
+          description: Pseudonymised before storage. We never keep it in the clear.
+        amount_minor:
+          type: integer
+          minimum: 0
+          description: Whole minor units — kobo, cents. Never a decimal.
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        transaction_type: { type: string }
+        channel: { type: string }
+        customer:
+          type: object
+          additionalProperties: false
+          properties:
+            kyc_tier: { type: integer }
+            account_created_at: { type: string, format: date-time }
+            last_transaction_at: { type: string, format: date-time }
+            country: { type: string }
+        destination:
+          type: object
+          additionalProperties: false
+          properties:
+            country: { type: string }
+            bank_code: { type: string }
+            is_new_beneficiary: { type: boolean }
+        device:
+          type: object
+          additionalProperties: false
+          properties:
+            id: { type: string }
+            ip_country: { type: string }
+
+    Decision:
+      type: object
+      required: [decision_id, outcome, ruleset_version, degraded]
+      properties:
+        decision_id: { type: string }
+        outcome: { type: string, enum: [allow, flag, block] }
+        reason: { type: string }
+        matched_rules:
+          type: array
+          items: { $ref: '#/components/schemas/MatchedRule' }
+        evaluated_rules: { type: integer }
+        ruleset_version: { type: integer }
+        latency_ms:
+          type: integer
+          description: Rounded to 5 ms. The exact figure is a measurement channel.
+        degraded:
+          type: boolean
+          description: |
+            True when at least one control did not actually run — a missing fact,
+            or Redis unavailable. `block` rules fail closed and `flag` rules fail
+            open by default, and every degraded decision is recorded and alerted
+            on. A sustained degraded rate is an incident, not a blip.
+        decided_at: { type: string, format: date-time }
+        customer_message:
+          type: string
+          description: Present on a block only. Written by your compliance team.
+
+    MatchedRule:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        severity: { type: string, enum: [block, flag, allow_with_note] }
+        regulatory_reference: { type: string }
+
+    StoredDecision:
+      allOf:
+        - $ref: '#/components/schemas/Decision'
+        - type: object
+          properties:
+            transaction_ref: { type: string }
+            amount_minor: { type: integer }
+            currency: { type: string }
+            shadow_matches: { type: array, items: { type: string } }
+            context:
+              type: object
+              description: The input as received.
+            resolved_facts:
+              type: object
+              description: |
+                Every fact as resolved at decision time. Without these a replay
+                re-gathers from a rolling window that has moved on, and would
+                present a different answer as a reproduction.
+            review_status: { type: string }
+            reviewed_by: { type: string }
+            review_notes: { type: string }
+
+    RuleState:
+      type: string
+      enum: [draft, shadow, active, archived]
+
+    RuleInput:
+      type: object
+      required: [name, category, expression, severity]
+      properties:
+        name: { type: string, maxLength: 128 }
+        description: { type: string }
+        category: { type: string, enum: [kyc, velocity, aml, fraud] }
+        regulatory_reference:
+          type: string
+          description: The regulation this rule implements. Shown to an approver.
+        expression:
+          type: string
+          maxLength: 2000
+          description: |
+            A single boolean expression. Interpreted over a validated syntax
+            tree, never with `eval` — see ADR-0001.
+          examples:
+            - amount_minor > tier_daily_limit_minor
+            - velocity_count(window='1h', min_amount_minor=50000000) > 5
+        severity: { type: string, enum: [block, flag, allow_with_note] }
+        priority: { type: integer }
+        customer_message:
+          type: string
+          description: Shown to the customer on a block. Yours to word, not ours.
+
+    Rule:
+      allOf:
+        - $ref: '#/components/schemas/RuleInput'
+        - type: object
+          properties:
+            id: { type: string }
+            state: { $ref: '#/components/schemas/RuleState' }
+            version: { type: integer }
+            created_by: { type: string }
+            approved_by:
+              type: string
+              description: Empty until approved. Cleared again if the rule is edited.
+            approved_at: { type: [string, 'null'], format: date-time }
+            activated_at: { type: [string, 'null'], format: date-time }
+            created_at: { type: string, format: date-time }
+
+    RuleSetVersion:
+      type: object
+      properties:
+        version: { type: integer }
+        rules_snapshot:
+          type: array
+          items: { type: object }
+          description: A frozen copy of every rule, not references to them.
+        lists_snapshot:
+          type: object
+          description: Named lists, frozen with the rules for the same reason.
+        published_at: { type: string, format: date-time }
+        published_by: { type: string }
+
+    NamedList:
+      type: object
+      required: [name, values]
+      properties:
+        name: { type: string, maxLength: 64 }
+        values: { type: array, items: { type: string } }
+        updated_by: { type: string }
+        updated_at: { type: string, format: date-time }
+
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        message: { type: string }
+        field: { type: string }
+
+    RuleError:
+      type: object
+      description: |
+        Written for a compliance officer, not a parser. Every rejection says what
+        is wrong, what to write instead, and why the rule cannot do it.
+      properties:
+        error: { type: string, const: invalid_rule }
+        problem:
+          type: string
+          examples: ['Rules cannot use a dot (.). You wrote customer.kyc_tier.']
+        fix:
+          type: string
+          examples: ['Facts are available by name on their own — write kyc_tier.']
+        reason:
+          type: string
+          examples: ['a dot is the main route a rule could use to break out of its sandbox']
+        offset: { type: [integer, 'null'] }
+
+    PaginatedRules:
+      type: object
+      properties:
+        count: { type: integer }
+        next: { type: [string, 'null'] }
+        previous: { type: [string, 'null'] }
+        results: { type: array, items: { $ref: '#/components/schemas/Rule' } }
+
+    PaginatedRuleSets:
+      type: object
+      properties:
+        count: { type: integer }
+        results: { type: array, items: { $ref: '#/components/schemas/RuleSetVersion' } }
+
+    PaginatedLists:
+      type: object
+      properties:
+        count: { type: integer }
+        results: { type: array, items: { $ref: '#/components/schemas/NamedList' } }

@@ -9,14 +9,14 @@ themselves — no engineer, no pull request, no deploy.
 > The person who owns the regulatory risk should be able to change the control without filing a
 > ticket.
 
-<!-- phase: 5 -->
+<!-- phase: 6 -->
 
-## Status — phase 4 complete, phase 5 in progress
+## Status — phase 5 complete, phase 6 in progress
 
-**Phases 0–4 are the shippable milestone, and they are done.** The engine serves reproducible
-decisions against a cached, versioned rule set, in well under the latency contract, with velocity
-rules that hold under concurrency. What is missing is everything a person touches: the management
-API, the approval workflow and real tenancy are phase 5, and the dashboard is phase 6.
+**A compliance officer can now change a control, and an engineer cannot.** Rules are authored,
+approved by somebody else, and activated through an API, with every transition on an append-only
+hash-chained trail. Tenants are isolated three ways over. What is missing is the part a compliance
+officer would actually use: the dashboard and rule builder are phase 6.
 
 | Phase | | What it delivers |
 |---|---|---|
@@ -25,7 +25,7 @@ API, the approval workflow and real tenancy are phase 5, and the dashboard is ph
 | 2 | ✅ | Interpreter, determinism, the decision endpoint |
 | 3 | ✅ | Velocity counters and aggregate facts |
 | 4 | ✅ | Rule cache, versioning, the latency contract |
-| 5 | ⬜ | Management API, approval workflow, tenancy |
+| 5 | ✅ | Management API, approval workflow, tenancy |
 | 6 | ⬜ | The dashboard and rule builder |
 | 7 | ⬜ | Backtest, shadow mode, review queue, analytics |
 | 8 | ⬜ | Load, chaos, packaging, release |
@@ -36,6 +36,15 @@ latency budget, and reproducible decisions.
 
 ## What works today
 
+- **Separation of duties that is real rather than documented.** Nobody approves their own change,
+  whatever their role. Editing a rule after approval clears the approval — otherwise the workflow is
+  theatre. An engineer cannot create or activate a compliance rule at all, which is the point of the
+  product rather than an oversight in a permission table.
+- **An audit trail that is evidence, not a log.** Hash-chained per tenant, append-only by database
+  trigger — an UPDATE fails for a superuser too — and corrections are appended rather than applied.
+- **Tenant isolation, three independent layers.** A key resolves to one tenant, the query layer
+  scopes every read, and row level security returns nothing if either is ever bypassed. Cross-tenant
+  reads return **404, never 403**: a 403 would confirm the object exists.
 - **A versioned rule cache with no database on the decision path.** Each worker compiles the rule
   set into memory and swaps it atomically. Propagation does not depend on pub/sub staying connected:
   there is a poll as well, and [the test that matters](tests/test_ruleset_cache.py) severs the
@@ -155,6 +164,7 @@ make ci
 | [`docs/plan-architecture.md`](docs/plan-architecture.md) | The decisions the specification leaves open, resolved, with their costs stated |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Nine phases, each with a mechanically checkable exit gate |
 | [`docs/plan-review-report.md`](docs/plan-review-report.md) | The plan review — 23 decisions, three of which contradicted the specification |
+| [`docs/openapi.yaml`](docs/openapi.yaml) | The API contract, tested against the URLconf so it cannot drift |
 | [`docs/security-review-phase1.md`](docs/security-review-phase1.md) | The sandbox security review — 14 findings, none of them holes in the allowlist |
 | [`docs/adr/`](docs/adr/) | Architecture decision records |
 
