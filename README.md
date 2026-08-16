@@ -9,15 +9,14 @@ themselves — no engineer, no pull request, no deploy.
 > The person who owns the regulatory risk should be able to change the control without filing a
 > ticket.
 
-<!-- phase: 7 -->
+<!-- phase: 8 -->
 
-## Status — phase 6 complete, phase 7 in progress
+## Status — phase 7 complete, phase 8 in progress
 
-**There is a dashboard, and a compliance officer can build every rule in the specification without
-seeing a line of code.** Sign in with a password and an authenticator, pick the question closest to
-what you need, watch the rule write itself, and send it to somebody else to approve. What is missing
-is the work that makes a rule change safe to *make*: backtesting, shadow mode and the analytics that
-show a rule firing too often. That is phase 7.
+**A rule change is now safe to make.** Test a candidate rule against real history before activating
+it, watch it in shadow on live traffic without affecting anyone, and see which of your rules are
+spending a reviewer's week without catching anything. What is left is getting it out of the
+door: load and chaos testing, the SDK, packaging and deploy.
 
 | Phase | | What it delivers |
 |---|---|---|
@@ -28,7 +27,7 @@ show a rule firing too often. That is phase 7.
 | 4 | ✅ | Rule cache, versioning, the latency contract |
 | 5 | ✅ | Management API, approval workflow, tenancy |
 | 6 | ✅ | The dashboard and rule builder |
-| 7 | ⬜ | Backtest, shadow mode, review queue, analytics |
+| 7 | ✅ | Backtest, shadow mode, review queue, analytics |
 | 8 | ⬜ | Load, chaos, packaging, release |
 
 A phase is ticked when its exit gate in [`docs/ROADMAP.md`](docs/ROADMAP.md) is green in CI, not when
@@ -37,6 +36,15 @@ latency budget, and reproducible decisions.
 
 ## What works today
 
+- **A backtest that says what it does not know.** A rule over facts that were recorded gets an
+  exact answer. A rule needing a fact nobody recorded gets no number at all and a pointer to shadow
+  mode, because an approximate figure on the screen where somebody decides whether to loosen a
+  control is worse than an honest blank. The caveat travels with the number rather than sitting in
+  a footnote.
+- **Rule analytics that name the rule drowning your queue.** False-positive rate derived from
+  recorded review outcomes, worst first: *"Fired 400 times and 95% were cleared on review. This rule
+  is spending reviewer time rather than catching anything."* A rule nobody has reviewed reports an
+  unknown rate rather than a flattering zero.
 - **A rule builder a compliance officer can actually use.** Six shapes, each asking a question
   rather than naming a construct — *"Is this customer splitting transactions to sit under a
   reporting threshold?"* — with the regulation prefilled and the expression writing itself as you

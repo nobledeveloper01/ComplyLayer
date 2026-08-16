@@ -53,19 +53,34 @@ ROOT_URLCONF = "server.urls"
 WSGI_APPLICATION = "server.wsgi.application"
 ASGI_APPLICATION = "server.asgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": _env("COMPLYLAYER_DB_NAME", "complylayer"),
-        "USER": _env("COMPLYLAYER_DB_USER", "complylayer"),
-        "PASSWORD": _env("COMPLYLAYER_DB_PASSWORD", "complylayer"),
-        "HOST": _env("COMPLYLAYER_DB_HOST", "127.0.0.1"),
-        "PORT": _env("COMPLYLAYER_DB_PORT", "5432"),
-        # Transaction-mode pooling is what makes `SET LOCAL` safe for row level
-        # security (D4). Persistent connections are set up in phase 5 alongside it.
-        "CONN_MAX_AGE": 0,
-    }
+_DEFAULT_DB = {
+    "ENGINE": "django.db.backends.postgresql",
+    "NAME": _env("COMPLYLAYER_DB_NAME", "complylayer"),
+    "USER": _env("COMPLYLAYER_DB_USER", "complylayer"),
+    "PASSWORD": _env("COMPLYLAYER_DB_PASSWORD", "complylayer"),
+    "HOST": _env("COMPLYLAYER_DB_HOST", "127.0.0.1"),
+    "PORT": _env("COMPLYLAYER_DB_PORT", "5432"),
+    # Transaction-mode pooling is what makes `SET LOCAL` safe for row level
+    # security (D4).
+    "CONN_MAX_AGE": 0,
 }
+
+# The replica exists as its own alias even when it points at the same server, so
+# that "this query runs on the replica" is a property of the code rather than of
+# the deployment. A backtest that reads `default` in development is a backtest
+# that will read the primary in production, and nothing would have said so.
+_REPLICA_DB = {
+    **_DEFAULT_DB,
+    "HOST": _env("COMPLYLAYER_REPLICA_HOST", _DEFAULT_DB["HOST"]),
+    "PORT": _env("COMPLYLAYER_REPLICA_PORT", _DEFAULT_DB["PORT"]),
+    # pytest-django clones `default` for tests; mirroring keeps the replica
+    # alias pointing at that same test database rather than a stale one.
+    "TEST": {"MIRROR": "default"},
+}
+
+DATABASES = {"default": _DEFAULT_DB, "replica": _REPLICA_DB}
+
+DATABASE_ROUTERS = ["complylayer.db_router.ReadReplicaRouter"]
 
 # Per §6.2. Every value here is a contract with the deployment, so each is
 # explicit rather than inferred.

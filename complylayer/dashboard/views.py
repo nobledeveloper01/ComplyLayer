@@ -194,6 +194,23 @@ def approval(request, rule_id: str):
         raise Http404
 
     actor = _actor(request)
+
+    if request.method == "POST" and request.POST.get("action") == "approve":
+        from complylayer import rules as lifecycle
+        from complylayer.tenancy import PermissionDenied
+
+        try:
+            lifecycle.approve(rule=rule, actor=actor, reason=request.POST.get("reason", ""))
+        except PermissionDenied as exc:
+            # The template hides the button, but the endpoint is the control. A
+            # hidden button is a hint; a refused POST is a rule.
+            return render(
+                request,
+                "complylayer/approval.html",
+                {**_chrome(request), "rule": rule, "error": str(exc)},
+                status=403,
+            )
+        return redirect("dashboard:rules")
     previous = (
         Rule.objects.filter(tenant=request.profile.tenant, name=rule.name)
         .exclude(id=rule.id)
