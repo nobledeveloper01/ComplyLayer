@@ -225,7 +225,10 @@ cannot write a velocity rule without help, the entire premise fails regardless o
 engine is.
 
 **Deliverables**
-- Design system and component decisions settled *before* implementation
+- ~~Design system and component decisions settled *before* implementation~~ —
+  done, in [`DESIGN.md`](../DESIGN.md). Colour is reserved for severity, headings
+  are a serif, and the approval diff has its own section because treating it as
+  "a diff view" is how it ends up as a text diff
 - Rule builder: visual builder for the common patterns, expression editor for the rest, live
   validation with errors phrased for a non-engineer
 - Template library annotated with regulatory references
