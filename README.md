@@ -9,14 +9,15 @@ themselves — no engineer, no pull request, no deploy.
 > The person who owns the regulatory risk should be able to change the control without filing a
 > ticket.
 
-<!-- phase: 6 -->
+<!-- phase: 7 -->
 
-## Status — phase 5 complete, phase 6 in progress
+## Status — phase 6 complete, phase 7 in progress
 
-**A compliance officer can now change a control, and an engineer cannot.** Rules are authored,
-approved by somebody else, and activated through an API, with every transition on an append-only
-hash-chained trail. Tenants are isolated three ways over. What is missing is the part a compliance
-officer would actually use: the dashboard and rule builder are phase 6.
+**There is a dashboard, and a compliance officer can build every rule in the specification without
+seeing a line of code.** Sign in with a password and an authenticator, pick the question closest to
+what you need, watch the rule write itself, and send it to somebody else to approve. What is missing
+is the work that makes a rule change safe to *make*: backtesting, shadow mode and the analytics that
+show a rule firing too often. That is phase 7.
 
 | Phase | | What it delivers |
 |---|---|---|
@@ -26,7 +27,7 @@ officer would actually use: the dashboard and rule builder are phase 6.
 | 3 | ✅ | Velocity counters and aggregate facts |
 | 4 | ✅ | Rule cache, versioning, the latency contract |
 | 5 | ✅ | Management API, approval workflow, tenancy |
-| 6 | ⬜ | The dashboard and rule builder |
+| 6 | ✅ | The dashboard and rule builder |
 | 7 | ⬜ | Backtest, shadow mode, review queue, analytics |
 | 8 | ⬜ | Load, chaos, packaging, release |
 
@@ -36,6 +37,14 @@ latency budget, and reproducible decisions.
 
 ## What works today
 
+- **A rule builder a compliance officer can actually use.** Six shapes, each asking a question
+  rather than naming a construct — *"Is this customer splitting transactions to sit under a
+  reporting threshold?"* — with the regulation prefilled and the expression writing itself as you
+  answer. Every §4.4 rule is reachable through it without touching the editor, which is
+  [asserted on every commit](tests/test_dashboard.py).
+- **An approval diff that shows a limit moving, not a character changing.** `₦50,000.00 →
+  ₦500,000.00`, `10× higher`, the regulation it claims, and what it would have done to last month's
+  transactions. Approve sits alone and unlocks only once the impact figure has been on screen.
 - **Separation of duties that is real rather than documented.** Nobody approves their own change,
   whatever their role. Editing a rule after approval clears the approval — otherwise the workflow is
   theatre. An engineer cannot create or activate a compliance rule at all, which is the point of the

@@ -56,6 +56,11 @@ def real_routes() -> set[str]:
             name = getattr(entry, "name", "") or ""
             if "format" in pattern or "api-root" in name:
                 continue
+            # The dashboard serves HTML to a signed-in person, not an API to a
+            # key holder. `openapi.yaml` documents the contract an integrator
+            # generates a client from; a login page is not part of it.
+            if pattern.startswith("dashboard/"):
+                continue
             routes.add(normalise(pattern))
 
     walk(get_resolver("server.urls_management").url_patterns, "")

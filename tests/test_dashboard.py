@@ -301,7 +301,7 @@ class TestDesignTokens:
     def stylesheets() -> str:
         from pathlib import Path
 
-        root = Path(__file__).resolve().parent.parent / "complylayer/dashboard/static/complylayer"
+        root = Path(__file__).resolve().parent.parent / "complylayer/static/complylayer"
         return (root / "tokens.css").read_text() + (root / "dashboard.css").read_text()
 
     def test_colour_is_reserved_for_severity(self):
@@ -345,3 +345,215 @@ class TestDesignTokens:
     def test_amounts_are_tabular(self):
         """A column whose digits do not align is a column somebody misreads."""
         assert "tabular-nums" in self.stylesheets()
+
+
+@pytest.mark.integration
+@pytest.mark.django_db
+class TestTheDashboardRenders:
+    """The pages, end to end, through Django's test client.
+
+    Auth is exercised for real rather than stubbed: the two-step sign-in is a
+    control, and a test that skips it would not notice the day it stops working.
+    """
+
+    @pytest.fixture(autouse=True)
+    def management_settings(self, management):
+        return management
+
+    @pytest.fixture
+    def officer(self):
+        from datetime import UTC, datetime
+
+        import pyotp
+        from django.contrib.auth.models import User
+
+        from complylayer.models import DashboardUser, Tenant
+
+        tenant = Tenant.objects.create(id="tnt_ui", name="UI")
+        user = User.objects.create_user(
+            username="adaeze@example.com", email="adaeze@example.com", password="correct-horse"
+        )
+        secret = pyotp.random_base32()
+        profile = DashboardUser.objects.create(
+            user=user,
+            tenant=tenant,
+            role="compliance_officer",
+            totp_secret=secret,
+            totp_confirmed_at=datetime.now(UTC),
+        )
+        return profile, secret
+
+    def sign_in(self, client, officer):
+        import pyotp
+
+        profile, secret = officer
+        client.post(
+            "/dashboard/sign-in", {"email": profile.user.email, "password": "correct-horse"}
+        )
+        client.post("/dashboard/verify", {"code": pyotp.TOTP(secret).now()})
+        return profile
+
+    def test_a_password_alone_does_not_get_you_in(self, client, officer):
+        """Django considers them authenticated. This product does not."""
+        profile, _ = officer
+        client.post(
+            "/dashboard/sign-in", {"email": profile.user.email, "password": "correct-horse"}
+        )
+        response = client.get("/dashboard/")
+        assert response.status_code == 302
+        assert response.url == "/dashboard/verify"
+
+    def test_a_wrong_password_says_nothing_useful(self, client, officer):
+        profile, _ = officer
+        response = client.post(
+            "/dashboard/sign-in", {"email": profile.user.email, "password": "wrong"}
+        )
+        assert response.status_code == 401
+        assert b"do not match" in response.content
+
+    def test_an_unknown_email_gives_the_identical_message(self, client, officer):
+        """Telling somebody which half they got right is telling them half of
+        what they need."""
+        response = client.post(
+            "/dashboard/sign-in", {"email": "nobody@example.com", "password": "correct-horse"}
+        )
+        assert b"do not match" in response.content
+
+    def test_both_factors_reach_the_rules_page(self, client, officer):
+        self.sign_in(client, officer)
+        response = client.get("/dashboard/")
+        assert response.status_code == 200
+        assert b"Rules" in response.content
+
+    def test_a_wrong_code_is_refused(self, client, officer):
+        profile, _ = officer
+        client.post(
+            "/dashboard/sign-in", {"email": profile.user.email, "password": "correct-horse"}
+        )
+        response = client.post("/dashboard/verify", {"code": "000000"})
+        assert response.status_code == 401
+
+    def test_signing_out_ends_the_session(self, client, officer):
+        self.sign_in(client, officer)
+        client.get("/dashboard/sign-out")
+        assert client.get("/dashboard/").status_code == 302
+
+    def test_the_builder_offers_every_shape(self, client, officer):
+        self.sign_in(client, officer)
+        content = client.get("/dashboard/new").content.decode()
+        for shape in SHAPES:
+            assert shape.name in content
+            assert shape.question in content
+
+    def test_the_builder_previews_a_valid_rule(self, client, officer):
+        self.sign_in(client, officer)
+        response = client.post(
+            "/dashboard/preview",
+            {"shape": "velocity_count", "window": "1h", "count": "5"},
+        )
+        body = response.json()
+        assert body["valid"] is True
+        assert body["expression"] == "velocity_count(window='1h') > 5"
+
+    def test_the_builder_returns_the_three_part_error(self, client, officer):
+        """The same catalogue the API returns. The builder does not get a
+        friendlier version of it."""
+        self.sign_in(client, officer)
+        body = client.post("/dashboard/validate", {"expression": "customer.kyc_tier > 2"}).json()
+        assert body["valid"] is False
+        assert "dot" in body["problem"].lower()
+        assert body["fix"]
+        assert body["reason"]
+
+    def test_a_half_finished_rule_says_what_is_missing(self, client, officer):
+        self.sign_in(client, officer)
+        body = client.post("/dashboard/preview", {"shape": "velocity_count"}).json()
+        assert body["valid"] is False
+        assert "missing" in body["problem"].lower()
+
+    def test_an_engineer_sees_no_new_rule_link(self, client, officer):
+        """Navigation is built from permissions, not hidden with CSS."""
+        profile, _ = officer
+        profile.role = "engineer"
+        profile.save()
+        self.sign_in(client, officer)
+        content = client.get("/dashboard/").content.decode()
+        assert "/dashboard/new" not in content
+
+    def test_the_approval_diff_shows_the_change_in_naira(self, client, officer):
+        from complylayer.models import Rule
+
+        profile = self.sign_in(client, officer)
+        Rule.objects.create(
+            id="rul_old",
+            tenant=profile.tenant,
+            name="Tier 2 limit",
+            category="kyc",
+            expression="amount_minor > 5000000",
+            severity="block",
+            state="archived",
+            version=1,
+            created_by="usr_someone",
+        )
+        Rule.objects.create(
+            id="rul_new",
+            tenant=profile.tenant,
+            name="Tier 2 limit",
+            category="kyc",
+            expression="amount_minor > 50000000",
+            severity="block",
+            state="draft",
+            version=2,
+            created_by="usr_someone",
+            regulatory_reference="CBN KYC Tier 2",
+        )
+
+        content = client.get("/dashboard/rules/rul_new").content.decode()
+        assert "₦50,000.00" in content
+        assert "₦500,000.00" in content
+        assert "10× higher" in content
+        assert "CBN KYC Tier 2" in content
+        assert "lets more transactions through" in content
+
+    def test_the_author_cannot_approve_their_own_change(self, client, officer):
+        """Absent, not disabled. A disabled button invites somebody to wonder
+        why; an absent one does not."""
+        from complylayer.models import Rule
+
+        profile = self.sign_in(client, officer)
+        Rule.objects.create(
+            id="rul_own",
+            tenant=profile.tenant,
+            name="Own rule",
+            category="kyc",
+            expression="amount_minor > 1",
+            severity="flag",
+            state="draft",
+            created_by=profile.user.username,
+        )
+        content = client.get("/dashboard/rules/rul_own").content.decode()
+        assert "Approve this change" not in content
+        assert "cannot approve it yourself" in content
+
+    def test_another_tenants_rule_is_not_found(self, client, officer):
+        from complylayer.models import Rule, Tenant
+
+        self.sign_in(client, officer)
+        other = Tenant.objects.create(id="tnt_other_ui", name="Other")
+        Rule.objects.create(
+            id="rul_other",
+            tenant=other,
+            name="Theirs",
+            category="kyc",
+            expression="amount_minor > 1",
+            severity="flag",
+            state="draft",
+            created_by="x",
+        )
+        assert client.get("/dashboard/rules/rul_other").status_code == 404
+
+    def test_an_empty_queue_reads_as_the_goal_state(self, client, officer):
+        self.sign_in(client, officer)
+        content = client.get("/dashboard/queue").content.decode()
+        assert "Nothing waiting for review" in content
+        assert "state--reassuring" in content

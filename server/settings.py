@@ -30,6 +30,15 @@ ALLOWED_HOSTS = [
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
+    # Sessions, messages and staticfiles are listed here rather than only in the
+    # management settings because migrations run against one database: the
+    # session table has to exist whichever workload created the schema. The
+    # *middleware* stays management-only, which is the part D7 is about — a
+    # decision worker never processes a session, it just shares a database with
+    # something that does.
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
     "complylayer",
 ]
 
@@ -37,6 +46,8 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
 ]
+
+STATIC_URL = "static/"
 
 ROOT_URLCONF = "server.urls"
 WSGI_APPLICATION = "server.wsgi.application"

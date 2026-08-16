@@ -1,0 +1,46 @@
+{# The shell every dashboard page renders into.
+
+   Navigation is built from permissions, not hidden with CSS: a section an
+   engineer cannot use is a section an engineer does not see. #}
+<!doctype html>
+<html lang="en" data-theme="{{ request.COOKIES.complylayer_theme|default:'' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}ComplyLayer{% endblock %}</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'complylayer/tokens.css' %}">
+  <link rel="stylesheet" href="{% static 'complylayer/dashboard.css' %}">
+</head>
+<body>
+{% if degraded_banner %}
+  {# Sticky, on every screen showing decision data. A reviewer who scrolls past
+     it is reading incomplete data without knowing. #}
+  <div class="degraded-banner" role="status">
+    <strong>{{ degraded_banner.title }}</strong>
+    <span>{{ degraded_banner.detail }}</span>
+  </div>
+{% endif %}
+
+<div class="layout">
+  <nav class="sidebar" aria-label="Sections">
+    <div class="sidebar__brand">ComplyLayer</div>
+    <a class="sidebar__link" href="{% url 'dashboard:rules' %}"
+       {% if section == 'rules' %}aria-current="page"{% endif %}>Rules</a>
+    {% if can.create_draft %}
+      <a class="sidebar__link" href="{% url 'dashboard:builder' %}"
+         {% if section == 'builder' %}aria-current="page"{% endif %}>New rule</a>
+    {% endif %}
+    {% if can.review_decision %}
+      <a class="sidebar__link" href="{% url 'dashboard:queue' %}"
+         {% if section == 'queue' %}aria-current="page"{% endif %}>Review queue</a>
+    {% endif %}
+    <a class="sidebar__link" href="{% url 'dashboard:sign-out' %}">Sign out</a>
+  </nav>
+
+  <main class="content{% block content_class %}{% endblock %}">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+</body>
+</html>

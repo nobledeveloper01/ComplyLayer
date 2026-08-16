@@ -13,7 +13,36 @@ ROOT_URLCONF = "server.urls_management"
 
 INSTALLED_APPS = [*INSTALLED_APPS, "rest_framework"]  # noqa: F405
 
-MIDDLEWARE = [*MIDDLEWARE, "complylayer.api.middleware.ApiKeyMiddleware"]  # noqa: F405
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "APP_DIRS": True,
+        "DIRS": [],
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+            ]
+        },
+    }
+]
+
+# Sessions are short and rotate on privilege change (§8.2). A dashboard session
+# that outlives the working day is a session somebody else can find on a shared
+# machine.
+SESSION_COOKIE_AGE = 8 * 60 * 60
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+
+MIDDLEWARE = [
+    *MIDDLEWARE,  # noqa: F405
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "complylayer.api.middleware.ApiKeyMiddleware",
+]
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [],

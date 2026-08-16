@@ -15,6 +15,7 @@ dependencies = [
     "orjson>=3.10",
     "argon2-cffi>=23.1",
     "djangorestframework>=3.15",
+    "pyotp>=2.9",
 ]
 
 [project.urls]
@@ -42,6 +43,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["complylayer"]
+# Templates and CSS are part of the package, not build artefacts. Without this
+# `pip install complylayer` installs a dashboard with no dashboard — and the
+# failure appears at first request rather than at install.
+artifacts = ["complylayer/templates/**", "complylayer/static/**"]
 
 # ---------------------------------------------------------------------------
 # Lint and format
@@ -90,7 +95,8 @@ ignore = [
 # "10x higher" with a real multiplication sign reads as a magnitude — which is
 # the whole point of the approval diff.
 "complylayer/dashboard/diff.py" = ["RUF001", "RUF002"]
-"tests/test_dashboard.py" = ["S603", "RUF001", "RUF002", "RUF012"]
+# A test password is a test password.
+"tests/test_dashboard.py" = ["S603", "S105", "S106", "RUF001", "RUF002", "RUF012"]
 # Tests shell out to the guard scripts on purpose, with arguments they construct
 # themselves.
 "tests/*" = ["S603", "RUF012"]

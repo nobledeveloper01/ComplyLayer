@@ -1,0 +1,132 @@
+{% extends "complylayer/base.html" %}
+{% block title %}New rule — ComplyLayer{% endblock %}
+{% block content %}
+<div class="page-header"><h1>New rule</h1></div>
+
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: var(--space-2xl);">
+  <div>
+    <h3>What should this rule check?</h3>
+    <p style="color: var(--ink-muted); font-size:14px;">
+      Each of these is a pattern a regulator recognises. Pick the question closest
+      to what you need.
+    </p>
+
+    <form id="builder" style="margin-top: var(--space-lg);">
+      {% csrf_token %}
+      <div class="field">
+        <label class="field__label" for="shape">Rule type</label>
+        <select class="field__select" id="shape" name="shape">
+          {% for shape in shapes %}
+            <option value="{{ shape.key }}" data-question="{{ shape.question }}"
+                    data-reference="{{ shape.regulatory_reference }}">{{ shape.name }}</option>
+          {% endfor %}
+        </select>
+        <p class="field__hint" id="question"></p>
+      </div>
+
+      {% for shape in shapes %}
+      <fieldset data-shape="{{ shape.key }}" hidden style="border:none;padding:0;margin:0">
+        <legend class="sr-only">{{ shape.name }}</legend>
+        {% for control in shape.inputs %}
+          <div class="field">
+            <label class="field__label" for="{{ shape.key }}-{{ control.key }}">
+              {{ control.label }}{% if not control.required %} <span style="color:var(--ink-faint)">(optional)</span>{% endif %}
+            </label>
+            {% if control.kind == 'window' %}
+              <select class="field__select" id="{{ shape.key }}-{{ control.key }}" name="{{ control.key }}">
+                {% for window in windows %}
+                  <option value="{{ window }}" {% if window == control.default %}selected{% endif %}>{{ window }}</option>
+                {% endfor %}
+              </select>
+            {% else %}
+              <input class="field__input {% if control.kind == 'amount' or control.kind == 'number' %}field__input--numeric{% endif %}"
+                     id="{{ shape.key }}-{{ control.key }}" name="{{ control.key }}"
+                     value="{{ control.default|default_if_none:'' }}">
+            {% endif %}
+            {% if control.hint %}<p class="field__hint">{{ control.hint }}</p>{% endif %}
+          </div>
+        {% endfor %}
+      </fieldset>
+      {% endfor %}
+    </form>
+  </div>
+
+  <div>
+    <h3>The rule you are writing</h3>
+    <p style="color: var(--ink-muted); font-size:14px;">
+      This is the text that will run, and the text an auditor will read. It updates
+      as you answer.
+    </p>
+    <div class="expression" id="expression" style="margin-top: var(--space-lg);">—</div>
+    <div id="feedback"></div>
+  </div>
+</div>
+
+<script>
+/* The one piece of client-side behaviour in the product: keep the expression in
+ * step with the answers. Everything else is a form post.
+ *
+ * Validation is a round trip rather than a reimplementation of the validator in
+ * JavaScript. A second implementation would drift, and the one it drifted from
+ * is the security boundary. */
+(function () {
+  const form = document.getElementById('builder');
+  const shape = document.getElementById('shape');
+  const question = document.getElementById('question');
+  const expression = document.getElementById('expression');
+  const feedback = document.getElementById('feedback');
+  const token = form.querySelector('[name=csrfmiddlewaretoken]').value;
+
+  function showShape() {
+    const selected = shape.value;
+    question.textContent = shape.selectedOptions[0].dataset.question;
+    form.querySelectorAll('fieldset[data-shape]').forEach(function (set) {
+      set.hidden = set.dataset.shape !== selected;
+      set.querySelectorAll('input, select').forEach(function (field) {
+        field.disabled = set.hidden;
+      });
+    });
+    preview();
+  }
+
+  let pending;
+  function preview() {
+    clearTimeout(pending);
+    pending = setTimeout(function () {
+      const body = new FormData();
+      body.append('shape', shape.value);
+      const set = form.querySelector('fieldset[data-shape="' + shape.value + '"]');
+      set.querySelectorAll('input, select').forEach(function (field) {
+        body.append(field.name, field.value);
+      });
+
+      fetch('{% url "dashboard:preview" %}', {
+        method: 'POST', body: body, headers: { 'X-CSRFToken': token }
+      })
+        .then(function (response) { return response.json(); })
+        .then(function (result) {
+          if (result.valid) {
+            expression.textContent = result.expression;
+            feedback.innerHTML = '<div class="rule-valid">This rule is valid.</div>';
+          } else {
+            feedback.innerHTML =
+              '<div class="rule-error">' +
+              '<div class="rule-error__problem"></div>' +
+              '<div class="rule-error__fix"></div>' +
+              '<div class="rule-error__reason"></div></div>';
+            /* textContent, never innerHTML: the message quotes what the officer
+             * typed back at them, and that string is not ours. */
+            feedback.querySelector('.rule-error__problem').textContent = result.problem || '';
+            feedback.querySelector('.rule-error__fix').textContent = result.fix || '';
+            feedback.querySelector('.rule-error__reason').textContent = result.reason || '';
+          }
+        });
+    }, 150);
+  }
+
+  shape.addEventListener('change', showShape);
+  form.addEventListener('input', preview);
+  showShape();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,95 @@
+{% extends "complylayer/base.html" %}
+{% block title %}Approve — ComplyLayer{% endblock %}
+{% block content_class %} content--prose{% endblock %}
+{% block content %}
+<div class="page-header"><h1>{{ rule.name }}</h1></div>
+
+{% if diff and diff.threshold %}
+  {# The change, in the unit a human thinks in, at display size. A reviewer
+     scanning a text diff sees a one-character change and approves it. #}
+  <h2>What changed</h2>
+  <div class="diff__change">
+    <span class="diff__amount diff__amount--before">{{ diff.threshold.render_before }}</span>
+    <span class="diff__arrow" aria-hidden="true">→</span>
+    <span class="diff__amount">{{ diff.threshold.render_after }}</span>
+    <span class="diff__magnitude {% if diff.threshold.looser %}diff__magnitude--looser{% else %}diff__magnitude--tighter{% endif %}">
+      {{ diff.threshold.magnitude }}
+    </span>
+  </div>
+  <p style="color: var(--ink-muted);">
+    {% if diff.threshold.looser %}
+      This lets more transactions through than the rule it replaces.
+    {% else %}
+      This lets fewer transactions through than the rule it replaces.
+    {% endif %}
+  </p>
+{% endif %}
+
+<h2 style="margin-top: var(--space-2xl);">The rule</h2>
+{% if diff %}
+  <p class="field__hint">Before</p>
+  <div class="expression">{{ diff.before }}</div>
+{% endif %}
+<p class="field__hint" style="margin-top: var(--space-md);">After</p>
+<div class="expression">{{ rule.expression }}</div>
+
+{% if rule.regulatory_reference %}
+  <p style="margin-top: var(--space-md);">
+    Implements <strong>{{ rule.regulatory_reference }}</strong>.
+  </p>
+{% endif %}
+
+{# A reviewer weighing "10x higher" is weighing an abstraction until they see it
+   means 1,204 transactions rather than 118. #}
+<div class="diff__impact">
+  <h3>If this had been live last month</h3>
+  <p>{{ impact.sentence }}</p>
+</div>
+
+<p style="color: var(--ink-muted);">
+  Requested by <strong>{{ rule.created_by }}</strong>{% if diff.reason %}: {{ diff.reason }}{% endif %}
+</p>
+
+{% if author_state %}
+  {# Read-only for the author, and it says why before they discover it by losing
+     an approval they waited two days for. #}
+  <div class="state state--pressure" style="text-align:left; margin-top: var(--space-xl);">
+    <div class="state__title">{{ author_state.title }}</div>
+    <p class="state__detail" style="margin-left:0">{{ author_state.detail }}</p>
+  </div>
+{% endif %}
+
+<div class="diff__actions">
+  {% if can_approve %}
+    {# Approve sits alone, and stays disabled until the reviewer has scrolled
+       past the impact figure. #}
+    <form method="post" action="{% url 'dashboard:approval' rule.id %}">
+      {% csrf_token %}
+      <button class="button" type="submit" name="action" value="approve"
+              id="approve" disabled>Approve this change</button>
+    </form>
+    <a class="button button--secondary" href="{% url 'dashboard:rules' %}">Not now</a>
+  {% else %}
+    <a class="button button--secondary" href="{% url 'dashboard:rules' %}">Back to rules</a>
+  {% endif %}
+</div>
+
+<script>
+/* Approve unlocks once the impact figure has been on screen. Not a dark
+ * pattern in reverse: the number is the thing a reviewer is being asked to
+ * weigh, and a button they can press without it having been visible is a
+ * button that collects a signature rather than a judgement. */
+(function () {
+  const approve = document.getElementById('approve');
+  const impact = document.querySelector('.diff__impact');
+  if (!approve || !impact) { return; }
+  if (!('IntersectionObserver' in window)) { approve.disabled = false; return; }
+
+  new IntersectionObserver(function (entries, observer) {
+    entries.forEach(function (entry) {
+      if (entry.isIntersecting) { approve.disabled = false; observer.disconnect(); }
+    });
+  }, { threshold: 0.9 }).observe(impact);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up your authenticator — ComplyLayer</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'complylayer/tokens.css' %}">
+  <link rel="stylesheet" href="{% static 'complylayer/dashboard.css' %}">
+</head><body>
+<main class="content content--prose" style="max-width: 480px; margin: 8vh auto;">
+  <h1>Set up your authenticator</h1>
+  <p style="color: var(--ink-muted);">
+    ComplyLayer decides whether money moves. A password on its own is not enough
+    to change one of those decisions, so every account needs a second factor
+    before it can do anything.
+  </p>
+
+  {% if error %}<div class="rule-error"><div class="rule-error__problem">{{ error }}</div></div>{% endif %}
+
+  <p style="margin-top: var(--space-xl);">Add this key to your authenticator app:</p>
+  <div class="expression">{{ secret }}</div>
+  <p class="field__hint">Or open <span class="expression" style="display:inline">{{ uri }}</span></p>
+
+  <form method="post" style="margin-top: var(--space-xl);">
+    {% csrf_token %}
+    <div class="field">
+      <label class="field__label" for="code">Then enter the code it shows</label>
+      <input class="field__input field__input--numeric" id="code" name="code"
+             inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}"
+             maxlength="6" autofocus required>
+    </div>
+    <button class="button" type="submit">Confirm</button>
+  </form>
+</main>
+</body></html>

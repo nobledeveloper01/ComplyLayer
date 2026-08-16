@@ -212,6 +212,40 @@ class ApiKey(models.Model):
         return self.revoked_at is None
 
 
+class DashboardUser(models.Model):
+    """A person who signs in to the dashboard.
+
+    Separate from `ApiKey` because they answer different questions. A key is an
+    integration acting on a tenant's behalf; a user is a named human whose
+    approval means something. §10.2's separation of duties depends on knowing
+    *which person* approved a change, and an API key cannot supply that.
+
+    Wraps Django's auth user rather than replacing it, so password hashing,
+    session handling and the reset flow stay Django's problem rather than this
+    project's.
+    """
+
+    user = models.OneToOneField(
+        "auth.User", on_delete=models.PROTECT, related_name="complylayer_profile"
+    )
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="users")
+    role = models.CharField(max_length=32)
+
+    # A second factor is mandatory, not offered. A single stolen password should
+    # not be able to weaken a compliance control.
+    totp_secret = models.CharField(max_length=64, blank=True)
+    totp_confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "complylayer_dashboarduser"
+
+    @property
+    def has_second_factor(self) -> bool:
+        return bool(self.totp_secret and self.totp_confirmed_at)
+
+
 class NamedList(models.Model):
     """A tenant-configured list a rule can refer to by name.
 

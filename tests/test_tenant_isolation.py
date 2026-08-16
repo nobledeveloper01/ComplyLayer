@@ -30,19 +30,10 @@ SETTINGS = "server.settings_management"
 
 
 @pytest.fixture(autouse=True)
-def management_urls(settings):
-    settings.ROOT_URLCONF = "server.urls_management"
-    settings.MIDDLEWARE = [*settings.MIDDLEWARE, "complylayer.api.middleware.ApiKeyMiddleware"]
-    settings.REST_FRAMEWORK = {
-        "DEFAULT_AUTHENTICATION_CLASSES": [],
-        "DEFAULT_PERMISSION_CLASSES": ["complylayer.api.management.permissions.IsAuthenticatedKey"],
-        "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
-        "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-        "PAGE_SIZE": 50,
-    }
-    auth.clear_cache()
-    yield
-    auth.clear_cache()
+def management_urls(management):
+    """Settings come from `tests/conftest.py`, in one place, so this suite and the
+    dashboard suite cannot disagree about them."""
+    return management
 
 
 def make_tenant(suffix: str) -> tuple[Tenant, str]:
@@ -242,6 +233,23 @@ class TestEveryRouteIsCovered:
         "list-detail",
     }
 
+    # Dashboard routes are session-authenticated rather than key-authenticated,
+    # so their isolation is proved in `tests/test_dashboard.py` — see
+    # `test_another_tenants_rule_is_not_found`. Named here so that adding a
+    # dashboard route still forces somebody to decide where it is covered.
+    DASHBOARD_COVERED = {
+        "dashboard:sign-in",
+        "dashboard:verify",
+        "dashboard:enrol",
+        "dashboard:sign-out",
+        "dashboard:rules",
+        "dashboard:builder",
+        "dashboard:preview",
+        "dashboard:validate",
+        "dashboard:approval",
+        "dashboard:queue",
+    }
+
     def test_no_management_route_is_unexercised(self):
         named = set()
         for pattern in get_resolver("server.urls_management").url_patterns:
@@ -251,7 +259,7 @@ class TestEveryRouteIsCovered:
                     if name and not re.search(r"api-root", name):
                         named.add(name)
 
-        uncovered = named - self.COVERED
+        uncovered = named - self.COVERED - {n.split(":")[-1] for n in self.DASHBOARD_COVERED}
         assert not uncovered, (
             f"these management routes have no tenant isolation test: {sorted(uncovered)}. "
             "Add one before adding the route — isolation somebody remembers to write is "

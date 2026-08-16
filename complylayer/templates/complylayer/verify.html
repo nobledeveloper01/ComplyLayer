@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verification — ComplyLayer</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'complylayer/tokens.css' %}">
+  <link rel="stylesheet" href="{% static 'complylayer/dashboard.css' %}">
+</head><body>
+<main class="content content--prose" style="max-width: 380px; margin: 12vh auto;">
+  <h1>One more step</h1>
+  <p style="color: var(--ink-muted);">
+    Enter the six-digit code from your authenticator app.
+  </p>
+
+  {% if error %}<div class="rule-error"><div class="rule-error__problem">{{ error }}</div></div>{% endif %}
+
+  <form method="post" style="margin-top: var(--space-xl);">
+    {% csrf_token %}
+    <div class="field">
+      <label class="field__label" for="code">Code</label>
+      {# One-time-code autocomplete lets a phone offer it, and inputmode keeps a
+         numeric keypad on mobile. Small things, but this is a screen somebody
+         uses several times a day. #}
+      <input class="field__input field__input--numeric" id="code" name="code"
+             inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}"
+             maxlength="6" autofocus required>
+    </div>
+    <button class="button" type="submit">Verify</button>
+  </form>
+</main>
+</body></html>

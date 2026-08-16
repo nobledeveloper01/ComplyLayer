@@ -70,6 +70,16 @@ class ThresholdChange:
         major = Decimal(value) / Decimal(divisor)
         return f"{symbol}{major:,.2f}"
 
+    # Django templates cannot call a method with an argument, and the alternative
+    # — formatting in the view — would put currency logic in two places.
+    @property
+    def render_before(self) -> str:
+        return self.render(self.before)
+
+    @property
+    def render_after(self) -> str:
+        return self.render(self.after)
+
     @property
     def magnitude(self) -> str:
         """The sentence a reviewer actually reads.

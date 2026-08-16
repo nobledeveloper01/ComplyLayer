@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in — ComplyLayer</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'complylayer/tokens.css' %}">
+  <link rel="stylesheet" href="{% static 'complylayer/dashboard.css' %}">
+</head><body>
+<main class="content content--prose" style="max-width: 380px; margin: 12vh auto;">
+  <h1>ComplyLayer</h1>
+  <p style="color: var(--ink-muted);">Sign in to review and change compliance rules.</p>
+
+  {% if error %}<div class="rule-error"><div class="rule-error__problem">{{ error }}</div></div>{% endif %}
+
+  <form method="post" style="margin-top: var(--space-xl);">
+    {% csrf_token %}
+    <div class="field">
+      <label class="field__label" for="email">Email address</label>
+      <input class="field__input" id="email" name="email" type="email" autocomplete="username" required>
+    </div>
+    <div class="field">
+      <label class="field__label" for="password">Password</label>
+      <input class="field__input" id="password" name="password" type="password"
+             autocomplete="current-password" required>
+    </div>
+    <button class="button" type="submit">Continue</button>
+  </form>
+</main>
+</body></html>

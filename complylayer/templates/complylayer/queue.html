@@ -1,0 +1,44 @@
+{% extends "complylayer/base.html" %}
+{% block title %}Review queue — ComplyLayer{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Review queue</h1></div>
+
+{% if state %}
+  <div class="state {% if state.tone == 'reassuring' %}state--reassuring{% elif state.tone == 'pressure' %}state--pressure{% endif %}">
+    <div class="state__title">{{ state.title }}</div>
+    <p class="state__detail">{{ state.detail }}</p>
+  </div>
+{% endif %}
+
+{% if decisions %}
+<table class="table">
+  <thead>
+    <tr>
+      <th scope="col">Decided</th>
+      <th scope="col">Transaction</th>
+      <th scope="col" class="numeric">Amount</th>
+      <th scope="col">Why</th>
+      <th scope="col">Outcome</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for decision in decisions %}
+    <tr>
+      <td>{{ decision.decided_at|date:"j M H:i" }}</td>
+      <td>{{ decision.transaction_ref }}</td>
+      <td class="numeric">{{ decision.amount_minor }}</td>
+      <td>{{ decision.reason|default:"—" }}</td>
+      <td>
+        <span class="severity severity--{{ decision.outcome }}">{{ decision.outcome }}</span>
+        {% if decision.degraded %}
+          {# A control that did not run is neither pass nor fail, and must never
+             be mistaken for either. #}
+          <span class="severity severity--degraded">degraded</span>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "complylayer/base.html" %}
+{% block title %}Rules — ComplyLayer{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Rules</h1>
+  {% if can.create_draft %}<a class="button" href="{% url 'dashboard:builder' %}">New rule</a>{% endif %}
+</div>
+
+{% if rules %}
+<table class="table">
+  <thead>
+    <tr>
+      <th scope="col">Rule</th>
+      <th scope="col">What it checks</th>
+      <th scope="col">Regulation</th>
+      <th scope="col">Severity</th>
+      <th scope="col">State</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for rule in rules %}
+    <tr>
+      <td><a href="{% url 'dashboard:approval' rule.id %}">{{ rule.name }}</a></td>
+      {# The expression, as code, everywhere it appears. The officer, the
+         approver and the auditor all read the text that runs. #}
+      <td><code class="expression" style="border:none;background:none;padding:0">{{ rule.expression }}</code></td>
+      <td>{{ rule.regulatory_reference|default:"—" }}</td>
+      <td><span class="severity severity--{{ rule.severity }}">{{ rule.severity }}</span></td>
+      <td>{{ rule.state }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="state">
+  <div class="state__title">No rules yet</div>
+  <p class="state__detail">
+    Every decision is allowed until a rule says otherwise. Start from a template —
+    each one is annotated with the regulation it implements.
+  </p>
+</div>
+{% endif %}
+{% endblock %}
