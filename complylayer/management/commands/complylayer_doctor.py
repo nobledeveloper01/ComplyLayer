@@ -24,6 +24,7 @@ class Command(BaseCommand):
         client = self._redis_client()
         results.append(checks.check_redis(client.ping))
         results.append(self._clock_skew(client))
+        results.append(self._audit_immutability())
 
         width = max(len(r.name) for r in results)
         for r in results:
@@ -51,6 +52,21 @@ class Command(BaseCommand):
         except Exception as exc:
             return checks.check_database(None, error=exc)
         return checks.check_database(version)
+
+    def _audit_immutability(self) -> checks.CheckResult:
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT tgname FROM pg_trigger
+                    WHERE tgrelid = 'complylayer_auditrecord'::regclass
+                      AND NOT tgisinternal
+                    """
+                )
+                names = [row[0] for row in cursor.fetchall()]
+        except Exception as exc:
+            return checks.check_audit_immutability(None, error=exc)
+        return checks.check_audit_immutability(names)
 
     def _redis_client(self) -> redis.Redis:
         return redis.Redis.from_url(settings.COMPLYLAYER["REDIS_URL"])

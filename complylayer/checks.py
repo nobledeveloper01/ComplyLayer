@@ -174,6 +174,38 @@ def check_clock_skew(redis_time_seconds: float | None, local_time_seconds: float
     )
 
 
+def check_audit_immutability(trigger_names: list[str] | None, error: Exception | None = None):
+    """The audit trail is only evidence if the database enforces it.
+
+    §8.3's claim is that immutability is enforced rather than promised, and the
+    difference is exactly these two triggers. A deployment whose migrations ran
+    but whose triggers were dropped — by a restore, by a schema tool, by
+    somebody debugging — looks completely healthy and quietly accepts an UPDATE
+    on an audit record.
+    """
+    required = {"complylayer_audit_append_only", "complylayer_audit_no_truncate"}
+
+    if error is not None:
+        return CheckResult(
+            name="audit trail",
+            ok=False,
+            detail=f"could not read the triggers: {error}",
+            remediation="Check the database connection and that migrations have run.",
+        )
+
+    missing = sorted(required - set(trigger_names or []))
+    if missing:
+        return CheckResult(
+            name="audit trail",
+            ok=False,
+            detail=f"append-only enforcement is missing: {', '.join(missing)}",
+            remediation="Run `manage.py migrate complylayer`. Until these exist the audit "
+            "trail can be edited, which means it is a log rather than evidence.",
+        )
+
+    return CheckResult(name="audit trail", ok=True, detail="append-only enforced by the database")
+
+
 def summarise(results: list[CheckResult]) -> tuple[int, int]:
     """Return (failures, warnings). The exit code is the count of fatal failures."""
     failures = sum(1 for r in results if not r.ok and r.fatal)

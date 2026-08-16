@@ -147,3 +147,32 @@ class TestSummarise:
         assert checks.CheckResult("a", ok=True, detail="").status == "ok"
         assert checks.CheckResult("a", ok=False, detail="", fatal=False).status == "warn"
         assert checks.CheckResult("a", ok=False, detail="", fatal=True).status == "FAIL"
+
+
+class TestAuditImmutability:
+    """Phase 5's check. The doctor grows one per phase, so a new failure mode
+    always arrives with its own preflight."""
+
+    def test_both_triggers_present_passes(self):
+        result = checks.check_audit_immutability(
+            ["complylayer_audit_append_only", "complylayer_audit_no_truncate"]
+        )
+        assert result.ok
+
+    def test_a_missing_trigger_is_fatal_and_names_it(self):
+        """A deployment whose triggers were dropped looks completely healthy and
+        quietly accepts an UPDATE on an audit record."""
+        result = checks.check_audit_immutability(["complylayer_audit_append_only"])
+        assert not result.ok
+        assert result.fatal
+        assert "no_truncate" in result.detail
+        assert "evidence" in result.remediation
+
+    def test_no_triggers_at_all(self):
+        assert not checks.check_audit_immutability([]).ok
+        assert not checks.check_audit_immutability(None).ok
+
+    def test_an_unreadable_schema_is_reported_rather_than_assumed_fine(self):
+        result = checks.check_audit_immutability(None, error=RuntimeError("permission denied"))
+        assert not result.ok
+        assert "permission denied" in result.detail
