@@ -79,6 +79,10 @@ ignore = [
 # Tests shell out to the guard scripts on purpose, with arguments they construct
 # themselves.
 "tests/*" = ["S603"]
+# A fuzzer wants a seeded, reproducible pseudo-random generator. A failure that
+# cannot be replayed is a failure nobody fixes, so `random.Random(seed)` is the
+# correct choice here rather than a weakness.
+"tests/test_dsl_fuzz.py" = ["S603", "S311", "RUF005"]
 
 # ---------------------------------------------------------------------------
 # Tests
