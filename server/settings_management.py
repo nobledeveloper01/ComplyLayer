@@ -1,0 +1,29 @@
+"""Settings for the management workload.
+
+The same image as the decision workload, chosen by COMPLYLAYER_ROLE. This module
+is the whole of D7's separation: it mounts the management URLconf, which the
+decision settings never do — so a decision worker has no route to rule
+management, and a heavy backtest cannot be scheduled onto a pod serving the
+critical path.
+"""
+
+from server.settings import *  # noqa: F403
+
+ROOT_URLCONF = "server.urls_management"
+
+INSTALLED_APPS = [*INSTALLED_APPS, "rest_framework"]  # noqa: F405
+
+MIDDLEWARE = [*MIDDLEWARE, "complylayer.api.middleware.ApiKeyMiddleware"]  # noqa: F405
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [],
+    "DEFAULT_PERMISSION_CLASSES": ["complylayer.api.management.permissions.IsAuthenticatedKey"],
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    # Page numbers rather than cursors. Cursor pagination needs a per-view
+    # ordering and gives a stable page under concurrent writes; it is the better
+    # answer for the decision log and arrives with the analytics work in phase 7,
+    # where there is enough volume for the difference to matter.
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 50,
+    "UNAUTHENTICATED_USER": None,
+}

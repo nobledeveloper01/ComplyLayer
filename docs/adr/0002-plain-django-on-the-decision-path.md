@@ -1,79 +1,97 @@
 # ADR-0002 — The decision endpoint is a plain Django view
 
-**Status:** accepted, with the deciding comparison still outstanding
-**Date:** 2026-08-16
+**Status:** superseded by its own benchmark. The latency argument is refuted;
+consolidation onto DRF is the follow-up.
+**Date:** 2026-08-16 (measured phase 2), settled phase 5
 
 ## Context
 
 The latency budget allows 2 ms to read and validate a decision request and 2 ms
 to serialise the response. D1 in `docs/plan-architecture.md` argued that a DRF
-request cycle — `Request` wrapping, content negotiation, a `Serializer`
-validating field by field, a renderer — routinely costs more than that on its
-own, and that the budget had been written as though the framework were free.
+request cycle costs more than that on its own, and that the budget had been
+written as though the framework were free.
 
 That was an argument, not a measurement. The plan committed to settling it here
 rather than leaving a second HTTP path in the repository on the strength of an
-assumption.
-
-## Decision
-
-`POST /v1/decisions` is a plain Django view with hand-written validation and
-`orjson` in both directions. Everything else — rules, approvals, analytics,
-reports — goes on DRF from phase 5, in a separate settings module, so a decision
-worker does not load the management URLconf at all (D7).
+assumption. This ADR now records both halves of that measurement.
 
 ## The measurements
 
-`make bench`, 2,000 iterations after a 100-call warm-up, 100 active rules,
-Python 3.12.13 on an M-series laptop:
+`make bench`, after a warm-up, 100 active rules, identical handler and store
+behind both paths, Python 3.12.13 / Django 5.2.17 on an M-series laptop.
+
+**Phase 2 — the plain path alone:**
 
 | | p50 | p99 |
 |---|---|---|
-| Rule evaluation alone (100 rules) | 0.285 ms | 0.301 ms |
+| Rule evaluation (100 rules) | 0.285 ms | 0.301 ms |
 | Full plain-Django request cycle | 0.323 ms | 0.406 ms |
 | Validation + serialisation in isolation | **3.0 µs** | **3.2 µs** |
 
-## What the numbers actually say, including against this decision
+Three microseconds against a five *millisecond* budget. That was already a weak
+result for the argument: DRF would have to be roughly 1,700 times slower to
+breach it. The ADR recorded D1 as *survivable, not proven*, and owed the
+comparison the day DRF became a dependency.
 
-The hand-written validation and serialisation cost **3 microseconds**. The budget
-line D1 was defending is 5 milliseconds. The path this ADR chose uses 0.06% of
-the allowance it was designed to protect.
+**Phase 5 — the comparison, DRF now installed:**
 
-That is a good result for the endpoint and a weak one for the argument. For DRF
-to breach a 5 ms budget it would have to be roughly 1,700 times slower than the
-hand-written path. DRF is slow by the standards of this budget, but it is not
-that slow — a full DRF cycle is typically 1–3 ms, which would fit, with less
-headroom but fit nonetheless.
+| | p50 | p99 |
+|---|---|---|
+| Plain Django | 0.324 ms | 0.375 ms |
+| DRF | 0.352 ms | 0.447 ms |
+| **DRF overhead** | +0.028 ms | **+0.072 ms** |
 
-**So the honest position is that D1 has not yet been proven, only shown to be
-survivable.** The claim that DRF cannot meet the budget remains untested, because
-DRF is not a dependency of this project until phase 5.
+## The verdict
 
-## What is still owed
+**Seventy-two microseconds, against a hundred-millisecond contract. D1's latency
+argument is refuted.**
 
-When DRF arrives in phase 5, `tests/test_decision_benchmark.py` gains the second
-half: the identical handler behind a DRF view, measured the same way. Then one of
-two things happens.
+DRF is not free, and on a tighter budget the difference could matter. It does not
+matter here. The framework overhead this ADR chose a second HTTP path to avoid is
+0.07% of the contract, and about 0.3% of the budget line it was defending.
 
-- **DRF lands outside the budget**, or inside it with little headroom: this ADR
-  stands, and it stands on a measurement rather than an expectation.
-- **DRF lands comfortably inside it**: the plain path is deleted, this ADR is
-  superseded, and the repository loses a second HTTP surface it did not need.
-  That is the outcome to hope for, because one path is cheaper to maintain than
-  two and the split only earns its keep if the numbers demand it.
+## What survives, and what does not
 
-Two code paths held together by an untested belief is exactly the kind of thing
-that survives for years because nobody re-checks it. The benchmark is checked in
-so that re-checking is one command.
+**Does not survive:** the reason for two view implementations. Nothing in the
+measurement justifies maintaining a hand-written request path alongside a DRF
+one.
 
-## Consequences
+**Survives, on other grounds:**
 
-- Two request paths and two middleware stacks until phase 5 resolves it. Mitigated
-  by D7, which makes the split load-bearing rather than cosmetic: a decision
-  worker has no route to rule management at all.
-- Request validation is hand-written. Reasonable here because the schema is small,
-  closed and versioned — and because it lets unknown fields be *rejected* rather
-  than ignored, which §8.4 wants and which a permissive serialiser would not give.
-- The endpoint has 99.6 ms of headroom against the 100 ms contract before any
-  Redis round trip or audit write. Phase 3 and phase 4 will spend most of that;
-  the point of recording it now is to know how much was there to begin with.
+- **D7's workload separation.** Decision workers and management workers run the
+  same image with different settings modules, so a decision worker has no route
+  to rule management at all. That is a URLconf decision, not a view-framework
+  one, and it holds whichever framework the decision endpoint uses.
+- **Rejecting unknown fields.** §8.4 wants a payload carrying a PAN to fail
+  rather than be stored and redacted. DRF serialisers ignore unknown fields by
+  default, so consolidating means writing that check explicitly rather than
+  inheriting it. It is a few lines, and it must not be lost in the move.
+
+## The follow-up, scoped
+
+Consolidate the decision endpoint onto DRF and delete
+`complylayer/api/decision.py`. The work is small because the handler was
+deliberately kept framework-agnostic from the start — it is the view wrapper that
+goes, not the logic:
+
+1. A DRF view calling the existing `DecisionHandler`.
+2. An explicit unknown-field check, carried over from `validation.py`.
+3. The decision URLconf pointed at it.
+4. `tests/test_decision_endpoint.py` runs unchanged; the benchmark keeps both
+   until the plain path is gone.
+
+Deliberately **not** done in the same change as the measurement. Deleting a
+tested, working path in the same commit that justifies deleting it makes the
+diff hard to review and the decision hard to revisit. The measurement is the
+finding; the deletion is the next change.
+
+## The lesson worth keeping
+
+The argument was plausible, specific, and wrong — and it stayed in the repository
+as a second code path for three phases because nobody could measure it yet. The
+thing that eventually settled it was a benchmark written at the same time as the
+decision, checked in, and run again when the missing dependency arrived.
+
+Two code paths held together by an untested belief is exactly what survives for
+years because nobody re-checks it. What made this one testable was writing the
+benchmark before the answer was available.

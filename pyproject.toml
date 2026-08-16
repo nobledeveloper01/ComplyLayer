@@ -14,6 +14,7 @@ dependencies = [
     "redis>=5.2",
     "orjson>=3.10",
     "argon2-cffi>=23.1",
+    "djangorestframework>=3.15",
 ]
 
 [project.urls]
@@ -81,9 +82,12 @@ ignore = [
 # Django Meta options (indexes, constraints, unique_together) are lists by
 # convention, which RUF012 reads as a mutable class attribute.
 "complylayer/models.py" = ["RUF012"]
+# DRF Meta options (fields, read_only_fields) are lists by convention, same as
+# Django's.
+"complylayer/api/management/*" = ["RUF012"]
 # Tests shell out to the guard scripts on purpose, with arguments they construct
 # themselves.
-"tests/*" = ["S603"]
+"tests/*" = ["S603", "RUF012"]
 # The benchmark reports numbers to a human reading the terminal. That is its
 # entire output.
 "tests/test_decision_benchmark.py" = ["S603", "T201"]

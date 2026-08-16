@@ -148,37 +148,82 @@ class TestWhereTheTimeGoes:
         assert stats["p99"] < FRAMEWORK_BUDGET_MS
 
 
-class TestTheD1Question:
-    def test_report_the_numbers_that_decide_it(self, handler, capsys):
-        """Prints the comparison ADR-0002 needs.
+@pytest.mark.django_db
+class TestTheD1QuestionAnsweredAtLast:
+    """The half of the D1 benchmark that phase 2 could not run.
 
-        DRF is not installed at phase 2 — it arrives with the management API in
-        phase 5 — so the honest thing to report today is the plain path's margin
-        against the budget, and to re-run this the day DRF is a dependency.
-        """
+    ADR-0002 recorded D1 as *survivable, not proven*: hand-written validation
+    cost 3 microseconds against a 5 millisecond budget, so DRF would have to be
+    about 1,700 times slower to fail — and DRF was not a dependency yet, so the
+    claim stayed untested. It is a dependency now.
+    """
+
+    def test_compare_the_two_request_cycles(self, handler, capsys, settings):
+        import django
+        from rest_framework.test import APIRequestFactory
+        from rest_framework.views import APIView
+
+        settings.REST_FRAMEWORK = {
+            "DEFAULT_AUTHENTICATION_CLASSES": [],
+            "DEFAULT_PERMISSION_CLASSES": [],
+            "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+        }
+
+        from rest_framework.response import Response as DrfResponse
+
+        from complylayer.api import validation
+
+        class DrfDecisionView(APIView):
+            """The same work, behind DRF's request cycle."""
+
+            def post(self, request):
+                transaction = validation.parse_transaction(request.data)
+                body = handler.decide(transaction, request.headers["Idempotency-Key"])
+                return DrfResponse({k: v for k, v in body.items() if not k.startswith("_")})
+
+        drf_view = DrfDecisionView.as_view()
+        drf_factory = APIRequestFactory()
+        plain_factory = RequestFactory()
         raw = orjson.dumps(BODY)
-        factory = RequestFactory()
         counter = {"n": 0}
 
-        def call():
+        def call_drf():
             counter["n"] += 1
-            request = factory.post(
+            request = drf_factory.post(
                 "/v1/decisions",
                 data=raw,
                 content_type="application/json",
-                headers={"idempotency-key": f"d1-{counter['n']}"},
+                headers={"idempotency-key": f"drf-{counter['n']}"},
+            )
+            return drf_view(request)
+
+        def call_plain():
+            counter["n"] += 1
+            request = plain_factory.post(
+                "/v1/decisions",
+                data=raw,
+                content_type="application/json",
+                headers={"idempotency-key": f"plain-{counter['n']}"},
             )
             request.decision_handler = handler
             return decisions(request)
 
-        stats = measure(call)
-        headroom = 100.0 - stats["p99"]
+        drf = measure(call_drf, 1000)
+        plain = measure(call_plain, 1000)
+        overhead = drf["p99"] - plain["p99"]
 
         with capsys.disabled():
-            print("\n  D1 — plain Django decision path, 100 active rules")
-            print(f"    p50       {stats['p50']:.3f} ms")
-            print(f"    p99       {stats['p99']:.3f} ms")
-            print(f"    headroom  {headroom:.1f} ms against the 100 ms contract")
-            print("    DRF comparison pending: it is not a dependency until phase 5.")
+            print(f"\n  D1 settled — Django {django.get_version()}, 100 active rules")
+            print(f"    plain Django   p50 {plain['p50']:.3f} ms   p99 {plain['p99']:.3f} ms")
+            print(f"    DRF            p50 {drf['p50']:.3f} ms   p99 {drf['p99']:.3f} ms")
+            print(f"    DRF overhead   p99 +{overhead:.3f} ms against a 100 ms contract")
+            verdict = (
+                "DRF fits the budget — the two-path split does not pay for itself"
+                if drf["p99"] < 25.0
+                else "DRF misses the stage budget — the split is justified"
+            )
+            print(f"    verdict: {verdict}")
 
-        assert stats["p99"] < 100.0
+        # Whatever the numbers say, neither path may breach the contract.
+        assert plain["p99"] < 100.0
+        assert drf["p99"] < 100.0

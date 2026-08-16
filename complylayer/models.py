@@ -177,6 +177,41 @@ class IdempotencyRecord(models.Model):
         ]
 
 
+class ApiKey(models.Model):
+    """A key resolves to exactly one tenant. No key spans tenants. Ever.
+
+    §8.1's first isolation layer. The prefix is stored in the clear so a lookup
+    is one indexed query and a dashboard can show which key is which; the secret
+    is Argon2id-hashed and shown once at creation.
+
+    Keys are scoped per environment, so a leaked test key can do nothing to live
+    data — and per role, so a key issued for an integration cannot activate a
+    rule any more than the engineer holding it could.
+    """
+
+    id = models.CharField(primary_key=True, max_length=32)  # key_...
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="api_keys")
+    name = models.CharField(max_length=128)
+    prefix = models.CharField(max_length=24, unique=True, db_index=True)
+    hashed_secret = models.CharField(max_length=255)
+    environment = models.CharField(max_length=8, default="live")  # test | live
+    role = models.CharField(max_length=32)
+    created_by = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Rotation uses overlapping validity: a new key is issued and both work until
+    # the old one is explicitly revoked, so rotation never causes downtime.
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "complylayer_apikey"
+        indexes = [models.Index(fields=["tenant", "environment"])]
+
+    @property
+    def is_active(self) -> bool:
+        return self.revoked_at is None
+
+
 class NamedList(models.Model):
     """A tenant-configured list a rule can refer to by name.
 

@@ -6,6 +6,14 @@
 
 PY := uv run
 
+# Load a local .env if there is one, so `make` and `./scripts/hello-world.sh`
+# agree about which Postgres they mean. A developer machine that already runs a
+# Postgres on 5432 needs to say so once, in one place.
+ifneq (,$(wildcard ./.env))
+include .env
+export
+endif
+
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "};{printf "  \033[36m%-18s\033[0m %s\n",$$1,$$2}'
 
