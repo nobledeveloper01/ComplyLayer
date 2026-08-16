@@ -9,19 +9,20 @@ themselves — no engineer, no pull request, no deploy.
 > The person who owns the regulatory risk should be able to change the control without filing a
 > ticket.
 
-<!-- phase: 2 -->
+<!-- phase: 3 -->
 
-## Status — phase 1 complete, phase 2 in progress
+## Status — phase 2 complete, phase 3 in progress
 
-The rule language exists and is sandboxed. A rule can be written, validated and rejected with a
-message a compliance officer can act on. **Nothing here serves a decision yet** — the interpreter
-that evaluates a validated rule, and the endpoint that returns an outcome, are phase 2.
+**It serves decisions.** `POST /v1/decisions` returns `allow`, `flag` or `block` against a versioned
+rule set, with the matched rules, the reason, and a decision that reproduces exactly when replayed.
+Velocity counters are the missing piece: the interface is there, backed by an in-memory
+implementation, and phase 3 puts Redis behind it.
 
 | Phase | | What it delivers |
 |---|---|---|
 | 0 | ✅ | Foundations: tooling, CI gates, `doctor`, hello-world script |
 | 1 | ✅ | The AST sandbox, escape corpus written first |
-| 2 | ⬜ | Interpreter, determinism, the decision endpoint |
+| 2 | ✅ | Interpreter, determinism, the decision endpoint |
 | 3 | ⬜ | Velocity counters and aggregate facts |
 | 4 | ⬜ | Rule cache, versioning, the latency contract |
 | 5 | ⬜ | Management API, approval workflow, tenancy |
@@ -35,6 +36,17 @@ latency budget, and reproducible decisions.
 
 ## What works today
 
+- **The decision endpoint.** `POST /v1/decisions` evaluates a versioned rule set and answers in
+  under half a millisecond for 100 rules. Idempotent: a retry returns the original decision
+  verbatim, timestamp included. Unknown fields are refused rather than ignored, so a payload
+  carrying a PAN does not get as far as being stored and redacted.
+- **Decisions that reproduce.** Same input and rule set version, same outcome — asserted across a
+  thousand evaluations and two separate processes. The three fields that legitimately differ
+  (`decision_id`, `decided_at`, `latency_ms`) are [named in the test](tests/test_determinism.py),
+  because a determinism test with a silent exclusion reports a guarantee nobody is checking.
+- **A failure mode that is a decision, not an accident.** A rule that cannot evaluate — missing fact,
+  Redis gone — is not a rule that did not match. `block` fails closed, `flag` fails open, and every
+  such decision is recorded as degraded so a sustained rate is an incident rather than a blip.
 - **The rule language.** A rule is parsed, checked against an allowlist of permitted syntax, and
   either accepted or rejected. All six of the specification's §4.4 example rules validate; 94
   published sandbox escapes do not, and [the corpus](tests/test_dsl_escapes.py) proves it on every
@@ -78,6 +90,30 @@ preflights the deployment. A healthy run ends like this:
 [  ok  ] clock skew      0.002 s between this host and Redis
 ```
 
+To serve a decision:
+
+```bash
+uv run python -c "
+from complylayer.api.handler import DecisionHandler
+from complylayer.api.store import InMemoryStore
+from complylayer.api.validation import parse_transaction
+from complylayer.dsl import validate_source
+from complylayer.engine import CompiledRule, RuleSet, Severity
+import json
+
+rules = RuleSet(47, (CompiledRule('rul_kyc_t2', 'Tier 2 single transaction limit',
+    validate_source('amount_minor > 50_000_000'), Severity.BLOCK, priority=10,
+    regulatory_reference='CBN KYC Tier 2',
+    customer_message='This transfer is above your tier 2 limit.'),))
+
+handler = DecisionHandler('tnt_demo', rules, InMemoryStore())
+txn = parse_transaction({'transaction_ref': 'TXN-1', 'customer_ref': 'usr_9931',
+    'amount_minor': 75000000, 'currency': 'NGN', 'customer': {'kyc_tier': 2}})
+body = handler.decide(txn, 'TXN-1')
+print(json.dumps({k: v for k, v in body.items() if not k.startswith('_')}, indent=2))
+"
+```
+
 To see the sandbox reject something, and say why:
 
 ```bash
@@ -105,6 +141,7 @@ make ci
 | [`docs/plan-architecture.md`](docs/plan-architecture.md) | The decisions the specification leaves open, resolved, with their costs stated |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Nine phases, each with a mechanically checkable exit gate |
 | [`docs/plan-review-report.md`](docs/plan-review-report.md) | The plan review — 23 decisions, three of which contradicted the specification |
+| [`docs/security-review-phase1.md`](docs/security-review-phase1.md) | The sandbox security review — 14 findings, none of them holes in the allowlist |
 | [`docs/adr/`](docs/adr/) | Architecture decision records |
 
 ## The parts worth reading first
@@ -112,6 +149,10 @@ make ci
 - **[ADR-0001](docs/adr/0001-ast-interpreter-not-eval.md)** — why rules are interpreted over a
   validated AST and never `eval`. This is the security core of the product; the obvious
   implementation is remote code execution offered as a feature.
+- **[ADR-0002](docs/adr/0002-plain-django-on-the-decision-path.md)** — the decision endpoint skips
+  DRF, and the benchmark that was supposed to justify that mostly undermines it. Hand-written
+  validation costs 3 microseconds against a 5 millisecond budget, which means DRF would have to be
+  1,700× slower to fail. Recorded as unproven rather than settled.
 - **[The latency budget](docs/plan-architecture.md#latency-budget-restated-with-the-omissions-filled-in)**
   — 100 ms p99, itemised by stage, including the two costs the specification's own budget omitted.
 - **[What went wrong in the plan](docs/plan-review-report.md#phase-3--engineering-review)** — nothing

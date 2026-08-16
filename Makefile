@@ -1,4 +1,4 @@
-.PHONY: help install fmt lint test test-integration cov guard readme-check doctor security ci up down clean
+.PHONY: help install fmt lint test test-integration cov bench guard readme-check doctor security ci up down clean
 
 # Keep every target in step with .github/workflows/ci.yml, so a green local run
 # and a green CI run mean the same thing. When they disagree, CI is right and
@@ -20,13 +20,16 @@ lint: ## Lint and check formatting
 	$(PY) ruff format --check .
 
 test: ## Unit tests, no Postgres or Redis needed
-	$(PY) pytest -m "not integration"
+	$(PY) pytest -m "not integration and not benchmark"
 
 test-integration: ## Full suite including anything that needs live services
 	$(PY) pytest
 
 cov: ## Unit tests with the coverage gate (90%)
-	$(PY) pytest -m "not integration" --cov=complylayer --cov-report=term-missing
+	$(PY) pytest -m "not integration and not benchmark" --cov=complylayer --cov-report=term-missing
+
+bench: ## The D1 benchmark — where the latency budget actually goes
+	$(PY) pytest -m benchmark -s
 
 guard: ## The eval/exec guard — see ADR-0001
 	$(PY) python scripts/no_eval_guard.py

@@ -78,9 +78,15 @@ ignore = [
 # The doctor and the standalone scripts print for a living.
 "complylayer/management/commands/*" = ["T20"]
 "scripts/*" = ["T20"]
+# Django Meta options (indexes, constraints, unique_together) are lists by
+# convention, which RUF012 reads as a mutable class attribute.
+"complylayer/models.py" = ["RUF012"]
 # Tests shell out to the guard scripts on purpose, with arguments they construct
 # themselves.
 "tests/*" = ["S603"]
+# The benchmark reports numbers to a human reading the terminal. That is its
+# entire output.
+"tests/test_decision_benchmark.py" = ["S603", "T201"]
 # A fuzzer wants a seeded, reproducible pseudo-random generator. A failure that
 # cannot be replayed is a failure nobody fixes, so `random.Random(seed)` is the
 # correct choice here rather than a weakness.
@@ -101,6 +107,9 @@ markers = [
     # a clean checkout can run the suite without docker; `make test-integration`
     # includes them.
     "integration: requires Postgres and Redis",
+    # Timing on a shared runner is noise, and a flaky blocking gate is one
+    # somebody eventually comments out. Run with `make bench`.
+    "benchmark: timing measurements, excluded from the default run",
 ]
 filterwarnings = ["error"]
 
