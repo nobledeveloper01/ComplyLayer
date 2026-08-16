@@ -264,50 +264,20 @@ The tempting implementation is `eval(rule.expression, context)`. That is remote 
 import ast
 
 ALLOWED_NODES = {
-    ast.Expression,
-    ast.BoolOp,
-    ast.BinOp,
-    ast.UnaryOp,
-    ast.Compare,
-    ast.Name,
-    ast.Load,
-    ast.Constant,
-    ast.And,
-    ast.Or,
-    ast.Not,
-    ast.Eq,
-    ast.NotEq,
-    ast.Lt,
-    ast.LtE,
-    ast.Gt,
-    ast.GtE,
-    ast.In,
-    ast.NotIn,
-    ast.Add,
-    ast.Sub,
-    ast.Mult,
-    ast.Div,
-    ast.Mod,
-    ast.Call,
-    ast.List,
-    ast.Tuple,
-    ast.keyword,
+    ast.Expression, ast.BoolOp, ast.BinOp, ast.UnaryOp, ast.Compare,
+    ast.Name, ast.Load, ast.Constant, ast.And, ast.Or, ast.Not,
+    ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn,
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod,
+    ast.Call, ast.List, ast.Tuple, ast.keyword,
 }
 
 ALLOWED_FUNCTIONS = {
-    "velocity_count",
-    "velocity_sum",
-    "days_since",
-    "in_list",
-    "hour_of_day",
-    "abs",
-    "min",
-    "max",
-    "percent_of",
+    'velocity_count', 'velocity_sum', 'days_since', 'in_list',
+    'hour_of_day', 'abs', 'min', 'max', 'percent_of',
 }
 
-MAX_NODES = 200  # complexity ceiling, enforced at parse time
-MAX_STEPS = 1000  # evaluation step budget, enforced at run time
+MAX_NODES = 200      # complexity ceiling, enforced at parse time
+MAX_STEPS = 1000     # evaluation step budget, enforced at run time
 
 
 class RuleValidator(ast.NodeVisitor):
@@ -388,7 +358,7 @@ def gather_velocity(r, tenant, customer_hash, windows):
     pipe = r.pipeline()
     for w in windows:
         key = f"v:{tenant}:{customer_hash}:{w}"
-        pipe.zremrangebyscore(key, 0, now - WINDOW_SECONDS[w])  # trim expired
+        pipe.zremrangebyscore(key, 0, now - WINDOW_SECONDS[w])   # trim expired
         pipe.zrange(key, 0, -1)
     return pipe.execute()
 ```
@@ -405,19 +375,19 @@ Choosing *where* to pay for strictness, rather than applying it uniformly or ign
 
 ```python
 class Rule(models.Model):
-    id = models.CharField(primary_key=True, max_length=32)  # rul_...
+    id = models.CharField(primary_key=True, max_length=32)      # rul_...
     tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
     name = models.CharField(max_length=128)
     description = models.TextField()
-    category = models.CharField(max_length=64)  # kyc|velocity|aml|fraud
+    category = models.CharField(max_length=64)         # kyc|velocity|aml|fraud
     regulatory_reference = models.CharField(max_length=255, blank=True)
 
     expression = models.TextField()
-    severity = models.CharField(max_length=16)  # block|flag|allow_with_note
-    priority = models.IntegerField(default=0)  # evaluation order
-    applies_to = models.JSONField(default=dict)  # scoping filters
+    severity = models.CharField(max_length=16)         # block|flag|allow_with_note
+    priority = models.IntegerField(default=0)          # evaluation order
+    applies_to = models.JSONField(default=dict)        # scoping filters
 
-    state = models.CharField(max_length=16)  # draft|shadow|active|archived
+    state = models.CharField(max_length=16)            # draft|shadow|active|archived
     version = models.PositiveIntegerField(default=1)
 
     created_by = models.CharField(max_length=64)
@@ -428,7 +398,7 @@ class Rule(models.Model):
     objects = TenantScopedManager()
 
     class Meta:
-        unique_together = [("tenant", "name", "version")]
+        unique_together = [('tenant', 'name', 'version')]
 
 
 class RuleSetVersion(models.Model):
@@ -437,34 +407,33 @@ class RuleSetVersion(models.Model):
     Decisions reference this rather than the Rule rows, which is what makes a
     decision reproducible after the underlying rules have changed.
     """
-
     tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
     version = models.PositiveIntegerField()
-    rules_snapshot = models.JSONField()  # a full frozen copy, not foreign keys
+    rules_snapshot = models.JSONField()        # a full frozen copy, not foreign keys
     published_at = models.DateTimeField(auto_now_add=True)
     published_by = models.CharField(max_length=64)
 
     class Meta:
-        unique_together = [("tenant", "version")]
+        unique_together = [('tenant', 'version')]
 
 
 class Decision(models.Model):
-    id = models.CharField(primary_key=True, max_length=32)  # dec_...
+    id = models.CharField(primary_key=True, max_length=32)      # dec_...
     tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
     idempotency_key = models.CharField(max_length=128)
-    ruleset_version = models.PositiveIntegerField()  # reproducibility
+    ruleset_version = models.PositiveIntegerField()             # reproducibility
 
     transaction_ref = models.CharField(max_length=128, db_index=True)
     customer_ref_hash = models.CharField(max_length=64, db_index=True)
     amount_minor = models.BigIntegerField()
     currency = models.CharField(max_length=3)
-    context = models.JSONField()  # the full input, so it can be replayed
+    context = models.JSONField()               # the full input, so it can be replayed
 
     outcome = models.CharField(max_length=16)  # allow|flag|block
     matched_rules = models.JSONField(default=list)
     shadow_matches = models.JSONField(default=list)
     reason = models.TextField(blank=True)
-    degraded = models.BooleanField(default=False)  # a fallback was used
+    degraded = models.BooleanField(default=False)   # a fallback was used
 
     latency_ms = models.PositiveIntegerField()
     decided_at = models.DateTimeField(db_index=True)
@@ -474,10 +443,10 @@ class Decision(models.Model):
     review_notes = models.TextField(blank=True)
 
     class Meta:
-        unique_together = [("tenant", "idempotency_key")]
+        unique_together = [('tenant', 'idempotency_key')]
         indexes = [
-            models.Index(fields=["tenant", "outcome", "decided_at"]),
-            models.Index(fields=["tenant", "review_status", "decided_at"]),
+            models.Index(fields=['tenant', 'outcome', 'decided_at']),
+            models.Index(fields=['tenant', 'review_status', 'decided_at']),
         ]
 ```
 
@@ -539,7 +508,8 @@ decision = evaluate(
     customer_ref=txn.user_id,
     amount_minor=txn.amount_minor,
     currency="NGN",
-    customer={"kyc_tier": txn.user.kyc_tier, "account_created_at": txn.user.created_at},
+    customer={"kyc_tier": txn.user.kyc_tier,
+              "account_created_at": txn.user.created_at},
 )
 if decision.outcome == "block":
     raise ComplianceBlocked(decision.customer_message, decision.id)
