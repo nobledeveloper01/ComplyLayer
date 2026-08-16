@@ -316,3 +316,44 @@ def non_ascii_source(char: str) -> RuleSyntaxError:
         reason="characters from other alphabets can look identical to English ones, and the "
         "rule would then read one way and behave another",
     )
+
+
+class RuleEvaluationError(ValueError):
+    """A rule was valid but could not be evaluated against this transaction.
+
+    Deliberately a different type from :class:`RuleSyntaxError`. A syntax error
+    is an authoring problem, caught at publish time, with the compliance officer
+    who wrote it standing right there. An evaluation error happens on the
+    decision path, months later, against a transaction nobody is watching — so
+    it is not a message to a person, it is an event that has to apply the
+    tenant's configured fallback for that rule's severity and mark the decision
+    degraded.
+
+    Conflating the two would let a missing fact read as "the rule did not
+    match", which turns a broken control into an absent one and reports nothing.
+    """
+
+    def __init__(self, reason: str, rule_id: str | None = None):
+        self.reason = reason
+        self.rule_id = rule_id
+        super().__init__(reason)
+
+
+def unknown_fact(name: str) -> RuleEvaluationError:
+    return RuleEvaluationError(f"no value was supplied for {name}")
+
+
+def step_budget_exceeded(budget: int) -> RuleEvaluationError:
+    return RuleEvaluationError(f"evaluation exceeded {budget} steps")
+
+
+def uncomparable(left: object, right: object) -> RuleEvaluationError:
+    return RuleEvaluationError(f"cannot compare {type(left).__name__} with {type(right).__name__}")
+
+
+def not_a_number(value: object) -> RuleEvaluationError:
+    return RuleEvaluationError(f"arithmetic needs whole numbers, got {type(value).__name__}")
+
+
+def result_too_large(bits: int, maximum: int) -> RuleEvaluationError:
+    return RuleEvaluationError(f"arithmetic produced a {bits}-bit number, limit is {maximum}")
