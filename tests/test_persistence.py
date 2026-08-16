@@ -217,3 +217,42 @@ class TestDatabaseStore:
 
     def test_a_replay_for_an_unseen_key_is_none(self, tenant):
         assert DatabaseStore().find_response(tenant.id, "never-seen") is None
+
+
+class TestPartitionCommand:
+    def test_it_creates_and_then_reports_nothing_to_do(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        first = StringIO()
+        call_command("complylayer_partitions", months_ahead=1, stdout=first)
+
+        second = StringIO()
+        call_command("complylayer_partitions", months_ahead=1, stdout=second)
+        assert "already present" in second.getvalue()
+
+    def test_it_warns_when_rows_are_stranded_in_the_default_partition(self, tenant):
+        """A row there means the command stopped running at some point, and
+        those decisions are in one unpartitioned heap."""
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        Decision.objects.create(
+            id="dec_warn",
+            decided_at=datetime(2035, 6, 1, tzinfo=UTC),
+            tenant=tenant,
+            idempotency_key="warn",
+            ruleset_version=1,
+            transaction_ref="TXN-W",
+            customer_ref_hash="z" * 64,
+            amount_minor=1,
+            currency="NGN",
+            context={},
+            outcome="allow",
+            latency_ms=1,
+        )
+        out = StringIO()
+        call_command("complylayer_partitions", months_ahead=1, stdout=out)
+        assert "default partition" in out.getvalue()

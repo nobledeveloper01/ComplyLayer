@@ -87,6 +87,7 @@ ignore = [
 # The benchmark reports numbers to a human reading the terminal. That is its
 # entire output.
 "tests/test_decision_benchmark.py" = ["S603", "T201"]
+"tests/test_latency_benchmark.py" = ["S603", "T201"]
 # A fuzzer wants a seeded, reproducible pseudo-random generator. A failure that
 # cannot be replayed is a failure nobody fixes, so `random.Random(seed)` is the
 # correct choice here rather than a weakness.

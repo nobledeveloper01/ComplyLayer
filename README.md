@@ -9,15 +9,14 @@ themselves — no engineer, no pull request, no deploy.
 > The person who owns the regulatory risk should be able to change the control without filing a
 > ticket.
 
-<!-- phase: 4 -->
+<!-- phase: 5 -->
 
-## Status — phase 3 complete, phase 4 in progress
+## Status — phase 4 complete, phase 5 in progress
 
-**It serves decisions, and velocity rules work.** `POST /v1/decisions` returns `allow`, `flag` or
-`block` against a versioned rule set, counting a customer's rolling windows out of Redis in a single
-round trip. A hundred concurrent transactions against a threshold of five let exactly five through,
-fifty runs in a row. The rule set is still passed in rather than cached and versioned — phase 4 does
-that, and puts the latency contract into CI.
+**Phases 0–4 are the shippable milestone, and they are done.** The engine serves reproducible
+decisions against a cached, versioned rule set, in well under the latency contract, with velocity
+rules that hold under concurrency. What is missing is everything a person touches: the management
+API, the approval workflow and real tenancy are phase 5, and the dashboard is phase 6.
 
 | Phase | | What it delivers |
 |---|---|---|
@@ -25,7 +24,7 @@ that, and puts the latency contract into CI.
 | 1 | ✅ | The AST sandbox, escape corpus written first |
 | 2 | ✅ | Interpreter, determinism, the decision endpoint |
 | 3 | ✅ | Velocity counters and aggregate facts |
-| 4 | ⬜ | Rule cache, versioning, the latency contract |
+| 4 | ✅ | Rule cache, versioning, the latency contract |
 | 5 | ⬜ | Management API, approval workflow, tenancy |
 | 6 | ⬜ | The dashboard and rule builder |
 | 7 | ⬜ | Backtest, shadow mode, review queue, analytics |
@@ -37,6 +36,15 @@ latency budget, and reproducible decisions.
 
 ## What works today
 
+- **A versioned rule cache with no database on the decision path.** Each worker compiles the rule
+  set into memory and swaps it atomically. Propagation does not depend on pub/sub staying connected:
+  there is a poll as well, and [the test that matters](tests/test_ruleset_cache.py) severs the
+  subscription entirely and requires the change to land anyway. A worker reports `readyz` only once
+  its cache is warm, so a deploy does not make every early request pay for the compile.
+- **The latency contract, measured.** 100 rules evaluate at **p99 0.245 ms** against a 5 ms stage
+  budget and a 100 ms contract. The gate is split: the evaluation stage blocks CI because it is
+  stable on a shared runner, and end-to-end runs nightly on real hardware — a flaky blocking gate is
+  one somebody deletes.
 - **Velocity rules that hold under concurrency.** A customer's rolling windows and their lifetime
   aggregates come out of Redis in one round trip, and the write is part of it — so a hundred
   simultaneous transactions against a "no more than five an hour" rule let exactly five through,
