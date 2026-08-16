@@ -23,6 +23,8 @@ from django.db import migrations
 
 APP_ROLE = "complylayer_app"
 
+# nosec B608 - APP_ROLE is a module constant, not input, and Postgres has no
+# placeholder for a role name in DDL.
 CREATE_ROLE = f"""
 DO $$
 BEGIN
@@ -49,7 +51,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT USAGE, SELECT ON SEQUENCES TO {APP_ROLE};
 """
 
-DROP_ROLE = f"""
+DROP_ROLE = f"""  # nosec B608 - see above
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {APP_ROLE};
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM {APP_ROLE};
 REVOKE USAGE ON SCHEMA public FROM {APP_ROLE};

@@ -1,0 +1,473 @@
+/* The dashboard stylesheet. Reads against tokens.css and defines no colour of
+ * its own.
+ *
+ * Interactive state is weight, underline, position and a focus ring — never
+ * hue. That is not minimalism for its own sake: every saturated pixel in this
+ * product is severity, so a blue button would be the only thing on screen that
+ * looks urgent and means nothing.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 22px;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  margin: 0;
+}
+h1 {
+  font-size: 32px;
+  line-height: 38px;
+}
+h2 {
+  font-size: 24px;
+  line-height: 30px;
+}
+h3 {
+  font-family: var(--font-body);
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  margin: 0;
+}
+
+/* Focus is a ring in ink, visible on every surface without introducing colour.
+ * Never removed — a keyboard user working a 500-row review queue needs to know
+ * where they are more than a mouse user needs a tidy outline. */
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  border-right: 1px solid var(--rule);
+  background: var(--surface-raised);
+  padding: var(--space-xl) 0;
+}
+
+.sidebar__brand {
+  font-family: var(--font-display);
+  font-size: 20px;
+  padding: 0 var(--space-xl) var(--space-xl);
+}
+
+.sidebar__link {
+  display: block;
+  padding: var(--space-sm) var(--space-xl);
+  color: var(--ink-muted);
+  text-decoration: none;
+  font-size: 14px;
+}
+.sidebar__link:hover {
+  color: var(--ink);
+  background: var(--surface-sunken);
+}
+/* Current page is marked by weight and a rule, not a coloured pill. */
+.sidebar__link[aria-current="page"] {
+  color: var(--ink);
+  font-weight: 500;
+  box-shadow: inset 2px 0 0 var(--ink);
+}
+
+.content {
+  padding: var(--space-2xl);
+  max-width: var(--content-max);
+}
+.content--prose {
+  max-width: var(--prose-max);
+}
+
+.page-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-xl);
+}
+
+/* ── Severity ─────────────────────────────────────────────────────────────
+ * The only colour in the product. Each carries a text label as well, because
+ * colour alone is not an accessible signal and a blocked transaction is not a
+ * thing to communicate by hue to somebody who cannot see it.
+ */
+
+.severity {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: var(--space-2xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid currentColor;
+}
+.severity--block {
+  color: var(--block);
+  background: var(--block-wash);
+}
+.severity--flag {
+  color: var(--flag);
+  background: var(--flag-wash);
+}
+.severity--allow {
+  color: var(--allow);
+  background: var(--allow-wash);
+}
+.severity--degraded {
+  color: var(--degraded);
+  background: var(--degraded-wash);
+}
+
+/* ── Tables ───────────────────────────────────────────────────────────────
+ * A review queue that shows 8 rows is a queue somebody scrolls; one that shows
+ * 20 is a queue somebody works.
+ */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface-raised);
+  border: 1px solid var(--rule);
+  font-size: 14px;
+}
+.table th {
+  text-align: left;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--rule);
+  position: sticky;
+  top: 0;
+  background: var(--surface-raised);
+}
+.table td {
+  padding: 0 var(--space-md);
+  height: var(--row-height);
+  border-bottom: 1px solid var(--rule);
+}
+.table tr:last-child td {
+  border-bottom: none;
+}
+/* Amounts and counts align on the digit. A column whose digits do not line up
+ * is a column somebody misreads, and these are limits on other people's money. */
+.table td.numeric,
+.amount {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ── Rule expressions ─────────────────────────────────────────────────────
+ * The product's most important string, rendered as code everywhere it appears
+ * so the officer, the approver and the auditor all read the text that runs.
+ */
+
+.expression {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 22px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-none);
+  padding: var(--space-md);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.expression__fact {
+  color: var(--ink);
+  font-weight: 500;
+}
+.expression__number {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.expression__op {
+  color: var(--ink-muted);
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────
+ * Primary is ink-filled; secondary is outlined; destructive is outlined in
+ * block. No gradients, no pills, no colour that is not severity.
+ */
+
+.button {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--surface-raised);
+  cursor: pointer;
+  transition: opacity var(--duration-micro) var(--ease-enter);
+}
+.button:hover:not(:disabled) {
+  opacity: 0.86;
+}
+.button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+.button--secondary {
+  background: transparent;
+  color: var(--ink);
+}
+.button--destructive {
+  background: transparent;
+  border-color: var(--block);
+  color: var(--block);
+}
+
+/* ── Forms ────────────────────────────────────────────────────────────────
+ * Label above the field, error below it. The label is never a placeholder: a
+ * placeholder disappears exactly when somebody needs to check what they are
+ * filling in.
+ */
+
+.field {
+  margin-bottom: var(--space-lg);
+}
+.field__label {
+  display: block;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  margin-bottom: var(--space-xs);
+}
+.field__input,
+.field__select {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 15px;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+.field__input--numeric {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.field__hint {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ink-muted);
+  margin-top: var(--space-xs);
+}
+
+/* An invalid rule is the error a compliance officer meets most often, so it is
+ * the one styled most carefully: what is wrong, what to write instead, and why. */
+.rule-error {
+  border-left: 2px solid var(--block);
+  background: var(--block-wash);
+  padding: var(--space-md);
+  margin-top: var(--space-md);
+}
+.rule-error__problem {
+  font-weight: 500;
+  color: var(--block);
+}
+.rule-error__fix {
+  margin-top: var(--space-xs);
+}
+.rule-error__reason {
+  margin-top: var(--space-xs);
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+.rule-valid {
+  border-left: 2px solid var(--allow);
+  background: var(--allow-wash);
+  padding: var(--space-md);
+  margin-top: var(--space-md);
+  color: var(--allow);
+  font-size: 14px;
+}
+
+/* ── The approval diff ────────────────────────────────────────────────────
+ * The highest-stakes screen in the product. Not a text diff: a reviewer
+ * scanning red-and-green lines sees a one-character change and approves it.
+ */
+
+.diff__change {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-lg);
+  flex-wrap: wrap;
+  padding: var(--space-lg) 0;
+}
+.diff__amount {
+  font-size: 28px;
+  line-height: 32px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.diff__amount--before {
+  color: var(--ink-muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.diff__arrow {
+  color: var(--ink-faint);
+}
+/* The single most important fact on the screen: which way the control moved. */
+.diff__magnitude {
+  font-size: 15px;
+  font-weight: 500;
+  padding: var(--space-2xs) var(--space-sm);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+}
+.diff__magnitude--looser {
+  color: var(--block);
+  background: var(--block-wash);
+}
+.diff__magnitude--tighter {
+  color: var(--allow);
+  background: var(--allow-wash);
+}
+
+/* The one exception to minimal motion: a changed threshold is highlighted once
+ * on first render, to draw the eye to the number that moved. Once, then never
+ * again. */
+@keyframes diff-sweep {
+  from {
+    background: var(--flag-wash);
+  }
+  to {
+    background: transparent;
+  }
+}
+.diff__changed-token {
+  font-weight: 600;
+  animation: diff-sweep var(--duration-medium) var(--ease-exit) 1;
+  box-shadow: inset 0 -2px 0 var(--flag);
+}
+@media (prefers-reduced-motion: reduce) {
+  .diff__changed-token {
+    animation: none;
+    background: var(--flag-wash);
+  }
+}
+
+.diff__impact {
+  border: 1px solid var(--rule);
+  background: var(--surface-raised);
+  padding: var(--space-lg);
+  margin: var(--space-lg) 0;
+}
+
+/* Approve sits alone. Not beside reject as an equal-weight pair, and disabled
+ * until the reviewer has scrolled past the impact figure. */
+.diff__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xl);
+  padding-top: var(--space-xl);
+  border-top: 1px solid var(--rule);
+}
+.diff__actions .button--secondary {
+  margin-left: auto;
+}
+
+/* ── States ───────────────────────────────────────────────────────────────
+ * The six the plan review found missing. Each is a designed screen rather than
+ * a gap where one should be.
+ */
+
+.state {
+  border: 1px solid var(--rule);
+  background: var(--surface-raised);
+  padding: var(--space-3xl) var(--space-xl);
+  text-align: center;
+}
+.state__title {
+  font-family: var(--font-display);
+  font-size: 24px;
+  line-height: 30px;
+}
+.state__detail {
+  color: var(--ink-muted);
+  margin-top: var(--space-sm);
+  max-width: 48ch;
+  margin-left: auto;
+  margin-right: auto;
+}
+/* Zero divergence is the most common shadow state and the one that tells an
+ * officer the rule is safe to activate. It should be the most reassuring screen
+ * in the product, not an empty table. */
+.state--reassuring {
+  border-left: 2px solid var(--allow);
+}
+.state--pressure {
+  border-left: 2px solid var(--flag);
+}
+
+/* Shown on every screen displaying decision data while a fallback is in use.
+ * Sticky, because a reviewer who scrolls past it is reading incomplete data
+ * without knowing. */
+.degraded-banner {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  gap: var(--space-sm);
+  align-items: baseline;
+  padding: var(--space-md) var(--space-xl);
+  background: var(--degraded-wash);
+  color: var(--degraded);
+  border-bottom: 1px solid currentColor;
+  font-size: 14px;
+}
+
+.progress {
+  height: 2px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+.progress__bar {
+  height: 100%;
+  background: var(--ink);
+  transition: width var(--duration-short) var(--ease-enter);
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--rule);
+  }
+  .content {
+    padding: var(--space-lg);
+  }
+}

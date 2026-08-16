@@ -1,0 +1,113 @@
+/* Design tokens. The single source is DESIGN.md; this file is that document
+ * expressed as custom properties, and nothing outside it defines a colour.
+ *
+ * The rule that matters most: colour is reserved for severity. There is no
+ * brand colour here, no blue for links, no accent for buttons. If a pixel is
+ * saturated it means block, flag, allow or degraded — because in a tool where
+ * red means "this transaction was refused", a red that also means "delete"
+ * means nothing.
+ */
+
+:root {
+  /* Neutrals — warm, not blue-grey. Blue-grey is the category's tell; warm grey
+   * reads as paper and ink, which suits a system of record. */
+  --ink: #1a1815;
+  --ink-muted: #5c574f;
+  --ink-faint: #8a8378;
+  --rule: #dfdad1;
+  --surface: #f7f5f1;
+  --surface-raised: #ffffff;
+  --surface-sunken: #efebe4;
+
+  /* Severity — the only colour in the product. */
+  --block: #8c2f26; /* oxblood: a considered refusal, not an error */
+  --block-wash: #f6e9e7;
+  --flag: #9a6100;
+  --flag-wash: #fbf1df;
+  --allow: #2c5f3e;
+  --allow-wash: #e9f0eb;
+  /* A control that did not run is neither pass nor fail, and must never be
+   * mistaken for either (§11.3 treats it as an availability failure). */
+  --degraded: #5b4b8a;
+  --degraded-wash: #efecf6;
+
+  --font-display: "Instrument Serif", Georgia, serif;
+  --font-body: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --space-2xs: 2px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+  --space-3xl: 48px;
+  --space-4xl: 64px;
+
+  --radius-sm: 3px;
+  --radius-none: 0;
+
+  /* Nothing longer than 240ms. A compliance tool that animates for delight
+   * wastes a reviewer's afternoon 200 rows at a time. */
+  --duration-micro: 80ms;
+  --duration-short: 160ms;
+  --duration-medium: 240ms;
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  --row-height: 36px;
+  --sidebar-width: 240px;
+  --content-max: 1440px;
+  --prose-max: 720px;
+}
+
+/* Dark mode is a redesign of the surfaces, not a filter over the light palette.
+ * Severity colours lift in luminance and drop saturation so they do not glow. */
+:root[data-theme="dark"] {
+  --ink: #ece8e1;
+  --ink-muted: #a8a196;
+  --ink-faint: #7a7268;
+  --rule: #322e28;
+  --surface: #141310;
+  --surface-raised: #1e1c18;
+  --surface-sunken: #282520;
+
+  --block: #d97b6e;
+  --block-wash: #2e1c19;
+  --flag: #d9a441;
+  --flag-wash: #2b2113;
+  --allow: #6fae86;
+  --allow-wash: #16241b;
+  --degraded: #9c8ccc;
+  --degraded-wash: #201c2c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #ece8e1;
+    --ink-muted: #a8a196;
+    --ink-faint: #7a7268;
+    --rule: #322e28;
+    --surface: #141310;
+    --surface-raised: #1e1c18;
+    --surface-sunken: #282520;
+
+    --block: #d97b6e;
+    --block-wash: #2e1c19;
+    --flag: #d9a441;
+    --flag-wash: #2b2113;
+    --allow: #6fae86;
+    --allow-wash: #16241b;
+    --degraded: #9c8ccc;
+    --degraded-wash: #201c2c;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-micro: 0ms;
+    --duration-short: 0ms;
+    --duration-medium: 0ms;
+  }
+}

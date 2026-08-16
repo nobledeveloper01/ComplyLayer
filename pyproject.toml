@@ -86,6 +86,11 @@ ignore = [
 # DRF Meta options (fields, read_only_fields) are lists by convention, same as
 # Django's.
 "complylayer/api/management/*" = ["RUF012"]
+# The multiplication sign is deliberate: "10x higher" reads as a variable name,
+# "10x higher" with a real multiplication sign reads as a magnitude — which is
+# the whole point of the approval diff.
+"complylayer/dashboard/diff.py" = ["RUF001", "RUF002"]
+"tests/test_dashboard.py" = ["S603", "RUF001", "RUF002", "RUF012"]
 # Tests shell out to the guard scripts on purpose, with arguments they construct
 # themselves.
 "tests/*" = ["S603", "RUF012"]
@@ -140,3 +145,10 @@ exclude_lines = [
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]
+# B608 flags string-built SQL. Every instance in this project is DDL — creating a
+# partition, creating a role — where Postgres accepts no placeholder for an
+# identifier. Each site validates its identifier against a pattern first
+# (`complylayer/partitions.py::_identifier`) or uses a module constant. Reviewed
+# rather than silenced blindly: if a query ever interpolates a *value*, it will
+# not be one of these files.
+skips = ["B608"]

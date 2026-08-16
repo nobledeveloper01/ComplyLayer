@@ -164,6 +164,7 @@ make ci
 | [`docs/plan-architecture.md`](docs/plan-architecture.md) | The decisions the specification leaves open, resolved, with their costs stated |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Nine phases, each with a mechanically checkable exit gate |
 | [`docs/plan-review-report.md`](docs/plan-review-report.md) | The plan review — 23 decisions, three of which contradicted the specification |
+| [`docs/adr/0004-server-rendered-dashboard.md`](docs/adr/0004-server-rendered-dashboard.md) | Why the dashboard is Django templates rather than a React SPA |
 | [`DESIGN.md`](DESIGN.md) | The design system — what the dashboard looks like and why |
 | [`docs/openapi.yaml`](docs/openapi.yaml) | The API contract, tested against the URLconf so it cannot drift |
 | [`docs/security-review-phase1.md`](docs/security-review-phase1.md) | The sandbox security review — 14 findings, none of them holes in the allowlist |
