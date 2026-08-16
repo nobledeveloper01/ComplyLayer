@@ -325,7 +325,8 @@ engine is.
 | `/design-consultation`, `/design-review` | Phase 6, before and after |
 | `/qa`, `/qa-only` | Phases 6, 7 and 8 |
 | `/investigate` | Any latency regression — the stage histogram exists to make this fast |
-| `/ship`, `/land-and-deploy`, `/canary`, `/document-release` | Phase 8 |
+| `/document-release` | **Every phase boundary**, to update the README — see below |
+| `/ship`, `/land-and-deploy`, `/canary` | Phase 8 |
 
 ---
 
@@ -346,3 +347,41 @@ Per §12.1, and every item is checkable:
 - [ ] Migration reviewed separately and reversible
 - [ ] Runbook updated if a new failure mode was introduced
 - [ ] ADR written for any non-obvious decision
+- [ ] **README updated** — see below
+
+---
+
+## The README is a phase deliverable
+
+Every phase ends by updating `README.md`. Not as a courtesy to a future reader — as the one document
+that has to stay honest about what the project actually does today, as opposed to what the roadmap
+says it will do eventually.
+
+A repository whose README describes the finished product while the code is four phases in is lying,
+and the person it lies to most effectively is the author six weeks later.
+
+**What gets updated at every phase boundary:**
+
+| Section | Update |
+|---|---|
+| Status line | The phase just completed, and what that means a reader can do right now |
+| Phase table | Tick the completed phase; nothing is ticked before its exit gate is green |
+| What works today | Real capabilities, in plain terms. If a decision cannot yet be served, it does not appear here |
+| Try it | The shortest real command sequence that demonstrates the phase's work. It must actually run — this section is copy-pasted more than it is read |
+| The parts worth reading first | New ADRs, new design documents |
+
+**Rules:**
+
+- **Never describe unbuilt work in the present tense.** "ComplyLayer serves decisions in under 100 ms"
+  is false until phase 4 measures it. Until then it is a target, and the README says so.
+- **Every command in "Try it" is executed before the phase is called done.** A README command that
+  fails is worse than no README, because it costs the reader their trust as well as their time.
+- **The phase table is ticked from the exit gate, not from the intent.** A phase whose gate is amber
+  is not ticked, however finished it feels.
+
+**Mechanically enforced.** `scripts/check-readme-phase.sh` asserts that the phase declared in the
+README matches the `PHASE` file at the repository root, and that every phase at or below it is
+ticked. It runs in the `quality` CI job. Bumping `PHASE` without touching the README fails the build,
+which is precisely the moment the update would otherwise get skipped.
+
+**Review:** `/document-release` at each phase boundary, which is what it is for.
