@@ -203,3 +203,116 @@ def reserved_name(name: str) -> RuleSyntaxError:
         "Names starting with an underscore belong to Python itself.",
         reason="reserved names are refused so a rule can never reach the runtime behind it",
     )
+
+
+def non_ascii_name(name: str) -> RuleSyntaxError:
+    """A rule that reads as one thing and evaluates as another is worse than a rejected one.
+
+    Replace the first letter of ``amount_minor`` with U+0430 CYRILLIC SMALL
+    LETTER A and it renders identically in every dashboard, diff and audit
+    export, while resolving to an entirely different fact.
+    An approver reading the rule would be approving a control that does not
+    exist, which defeats the four-eyes review the product is sold on.
+    """
+    return RuleSyntaxError(
+        problem=f"{name!r} contains characters that are not plain English letters.",
+        fix="Fact and function names use a-z, 0-9 and underscores only. If you copied this "
+        "from elsewhere, retype it.",
+        reason="letters from other alphabets can look identical to English ones, so a rule "
+        "could read one way and behave another",
+    )
+
+
+def wrong_arity(function: str, given: int, expected: int) -> RuleSyntaxError:
+    plural = "value" if expected == 1 else "values"
+    return RuleSyntaxError(
+        problem=f"{function} needs {expected} {plural}, but was given {given}.",
+        fix=f"Write {function}({', '.join('...' for _ in range(expected))})."
+        if expected
+        else f"Write {function}() with nothing in the brackets.",
+    )
+
+
+def duplicate_keyword(function: str, keyword: str) -> RuleSyntaxError:
+    return RuleSyntaxError(
+        problem=f"{function} was given {keyword} twice.",
+        fix="Remove one of them.",
+        reason="with two values there is no way to say which one the rule meant",
+    )
+
+
+def bad_literal(value: object) -> RuleSyntaxError:
+    """Whole numbers and text only. See D6 in docs/plan-architecture.md."""
+    kind = {
+        float: "a decimal number",
+        complex: "an imaginary number",
+        bytes: "raw bytes",
+        type(None): "nothing",
+        type(...): "...",
+    }.get(type(value), f"a {type(value).__name__}")
+    return RuleSyntaxError(
+        problem=f"Rules cannot contain {kind}.",
+        fix="Amounts are whole numbers of minor units — write 1500000 for ₦15,000.00, "
+        "not 15000.00.",
+        reason="decimals cannot be compared exactly, and a decision has to reproduce "
+        "identically years later",
+    )
+
+
+def non_numeric_operand() -> RuleSyntaxError:
+    """`'a' * 999999999` is one step and a gigabyte. A step budget cannot see it."""
+    return RuleSyntaxError(
+        problem="Arithmetic in a rule works on whole numbers only.",
+        fix="Compare amounts and counts, not text or lists.",
+        reason="multiplying text or a list repeats it, which can exhaust memory in a single step",
+    )
+
+
+def division_by_zero() -> RuleSyntaxError:
+    return RuleSyntaxError(
+        problem="The rule divides by zero.",
+        fix="Use a number other than zero.",
+    )
+
+
+def not_a_condition() -> RuleSyntaxError:
+    return RuleSyntaxError(
+        problem="This rule is a fixed value, so it would give the same answer every time.",
+        fix="A rule asks a question about the transaction, such as amount_minor > 5_000_000.",
+        reason="a rule that always fires blocks everything, and one that never fires is "
+        "a control that is not there",
+    )
+
+
+def number_too_large(digits: int, maximum: int) -> RuleSyntaxError:
+    return RuleSyntaxError(
+        problem=f"That number has {digits} digits, and the limit is {maximum}.",
+        fix="Amounts are in minor units, so even large limits are far shorter than this.",
+    )
+
+
+def too_much_input(maximum: int) -> RuleSyntaxError:
+    return RuleSyntaxError(
+        problem="The rule has too many parts to build.",
+        fix="Split it into two rules.",
+        reason=f"a built rule cannot exceed {maximum} characters once written out",
+    )
+
+
+def non_ascii_source(char: str) -> RuleSyntaxError:
+    """Non-ASCII outside a text value, caught before parsing rather than after.
+
+    ``ast.parse`` NFKC-normalises identifiers, so ``abs`` written with
+    U+FF41 FULLWIDTH LATIN SMALL LETTER A becomes
+    ``abs`` in the tree. Checking the parsed name is therefore too late: by then
+    the character is gone and the validator sees a perfectly ordinary ASCII
+    name, while the stored rule text still reads as something else. The only
+    place the divergence is visible is the source.
+    """
+    return RuleSyntaxError(
+        problem=f"The rule contains {char!r}, which is not a plain English character.",
+        fix="Retype the rule using a-z, 0-9 and the usual symbols. Accented characters are "
+        "fine inside quoted text, just not in names.",
+        reason="characters from other alphabets can look identical to English ones, and the "
+        "rule would then read one way and behave another",
+    )

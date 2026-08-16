@@ -270,3 +270,118 @@ def test_a_plain_dotted_fact_gets_the_dot_message():
     with pytest.raises(RuleSyntaxError) as exc:
         validate_source("''.join(high_risk_countries)")
     assert "dot" in str(exc.value).lower()
+
+
+# ---------------------------------------------------------------------------
+# Findings from the phase 1 security review.
+#
+# Two independent reviewers went at the sandbox after it was built. The node
+# allowlist itself held — an exhaustive sweep of every node type reachable from
+# `ast.parse(mode='eval')` found no hole. Everything below got through anyway,
+# by attacking what a node *contains* rather than what it *is*, or by defeating
+# a textual guard the parser ran before it.
+#
+# Each entry is a payload that was ACCEPTED by the validator as originally
+# written, with the confirmed behaviour recorded alongside it.
+# ---------------------------------------------------------------------------
+
+REVIEW_FINDINGS = [
+    # D6 removed ast.Div so a rule could not produce a float, and left open the
+    # door that simply writes one. None and Ellipsis are worse than untidy:
+    # comparing them raises TypeError at decision time, on the critical path,
+    # for a rule that published cleanly.
+    "amount_minor > 1.5",
+    "amount_minor > 1e400",
+    "amount_minor > .1 + .2",
+    "amount_minor == 1j",
+    "amount_minor == b'\\x00'",
+    "amount_minor == ...",
+    "amount_minor == None",
+    # Permitted nodes, one evaluation step, one gigabyte. MAX_STEPS counts
+    # steps and cannot see an allocation.
+    "'a' * 999999999 == 'x'",
+    "'a' * 99999 * 99999 * 99999 == 'x'",
+    "[0] * 999999999 == []",
+    "[0, 1] * 99999 * 99999 == []",
+    # ast.Mod on a string is printf formatting, not arithmetic.
+    "'%s' % amount_minor == 'x'",
+    # U+0430 CYRILLIC SMALL LETTER A. Renders identically to `amount_minor` in
+    # every dashboard, diff and audit export, and resolves to a different fact —
+    # so an approver signs off a control that does not exist. Caught in the
+    # source scan, because ast.parse NFKC-normalises identifiers and the tree
+    # would look innocent by the time the validator saw it.
+    "аmount_minor > 5000000",
+    "ａbs(1) > 1",
+    "\U0001d41a\U0001d41b\U0001d42c(1) > 1",
+    # SPECS carried the arity all along; the check was never written. These
+    # published cleanly and would have raised TypeError at decision time.
+    "abs(1, 2, 3, 4, 5) > 1",
+    "abs() > 1",
+    "hour_of_day(1, 2, 3) > 1",
+    "min() > 1",
+    "in_list() > 1",
+    "percent_of(amount_minor, 90, 1, 2) > 1",
+    # CPython rejects a repeated keyword at compile time, which this pipeline
+    # deliberately never runs. Without the check, which window applies is
+    # decided by iteration order.
+    "velocity_count(window='1h', window='2h') > 5",
+    # Division by a literal zero, and rules that are not conditions at all.
+    "amount_minor // 0 > 1",
+    "amount_minor % 0 > 1",
+    "True",
+    "1",
+    "'always'",
+]
+
+# The guard bypasses. Kept separate because these are about the textual scan
+# that runs before parsing, not about the grammar.
+GUARD_BYPASSES = [
+    # `not\t`, `not\x0b`, `not\x0c` all parse exactly as `not `. The guard
+    # matched the literal string "not " and so was one whitespace character
+    # away from being decorative.
+    ("not\t" * 400) + "amount_minor",
+    ("not\x0b" * 400) + "amount_minor",
+    ("not\x0c" * 400) + "amount_minor",
+    # Paren laundering. The depth counter scanned raw text and floored at zero,
+    # so a string full of `)` reset it while real brackets stayed open.
+    # `(("))"or ` is depth-neutral to the guard and +2 real depth each time.
+    # This reached a real AST depth of 68 against an advertised maximum of 20.
+    ('(("))"or ' * 66) + "1" + ("))" * 66),
+    ('(("))"or ' * 180) + "1" + ("))" * 180),
+]
+
+
+@pytest.mark.parametrize("source", REVIEW_FINDINGS, ids=lambda s: s[:48])
+def test_security_review_findings_stay_closed(source: str):
+    with pytest.raises(RuleSyntaxError):
+        validate_source(source)
+
+
+@pytest.mark.parametrize("source", GUARD_BYPASSES, ids=lambda s: repr(s[:32]))
+def test_guard_bypasses_stay_closed(source: str):
+    with pytest.raises(RuleSyntaxError):
+        validate_source(source)
+
+
+def test_legitimate_rules_survived_the_hardening():
+    """Every fix above narrows the grammar, and narrowing can go too far.
+
+    A validator that rejects everything passes every test in this file and
+    leaves the product with no rule language.
+    """
+    for source in SPEC_EXAMPLES_FOR_REGRESSION:
+        validate_source(source)
+
+
+SPEC_EXAMPLES_FOR_REGRESSION = [
+    "amount_minor > tier_daily_limit_minor",
+    "velocity_count(window='1h', min_amount_minor=50_000_000) > 5",
+    "days_since(last_transaction_at) > 90 and amount_minor > 20_000_000",
+    "in_list(destination_country, high_risk_countries) and kyc_tier < 3",
+    "percent_of(balance_minor, 90) < amount_minor",
+    "amount_minor // 100 > 5",
+    "not (kyc_tier == 3)",
+    # Accented text inside a quoted value is fine. Only names are ASCII-only,
+    # because NFKC normalisation does not touch string contents.
+    "destination_country == 'Côte'",
+]
