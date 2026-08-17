@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+.pytest_cache
+.ruff_cache
+htmlcov
+tests
+docs
+deploy
+scripts
+sdk
+*.md
+.env
+.env.*
+compose.yaml
+Makefile

@@ -1,0 +1,124 @@
+name: release
+
+# One tag, both packages. The Python package and the Node SDK are versioned
+# together and released from the same tag, so a customer never has to work out
+# which client version speaks to which server.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write # trusted publishing: no long-lived token in the repository
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: complylayer
+          POSTGRES_USER: complylayer
+          POSTGRES_PASSWORD: complylayer
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U complylayer"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      COMPLYLAYER_DB_HOST: 127.0.0.1
+      COMPLYLAYER_REDIS_URL: redis://127.0.0.1:6379/2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: { version: "0.11.26", enable-cache: true }
+      - run: uv sync --frozen
+
+      # A tag does not get to skip the gates. Everything a pull request must
+      # pass, a release must pass again — on the exact commit being published.
+      - run: uv run python scripts/no_eval_guard.py
+      - run: uv run pytest -m "not benchmark" --cov=complylayer
+
+      - name: the tag matches the packaged version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PY=$(uv run python -c "import complylayer; print(complylayer.__version__)")
+          NODE=$(node -p "require('./sdk/node/package.json').version")
+          echo "tag=$TAG python=$PY node=$NODE"
+          test "$TAG" = "$PY" || { echo "::error::tag $TAG does not match complylayer $PY"; exit 1; }
+          test "$TAG" = "$NODE" || { echo "::error::tag $TAG does not match the SDK $NODE"; exit 1; }
+
+  python:
+    name: pypi
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: { version: "0.11.26" }
+      - run: uv build
+      # The wheel must carry the templates and CSS, or `pip install complylayer`
+      # gives a dashboard with no dashboard — and the failure appears at first
+      # request rather than at install.
+      - name: the wheel carries the dashboard
+        run: |
+          python -m zipfile -l dist/*.whl | grep -q 'complylayer/templates/complylayer/builder.html'
+          python -m zipfile -l dist/*.whl | grep -q 'complylayer/static/complylayer/tokens.css'
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  node:
+    name: npm
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", registry-url: "https://registry.npmjs.org" }
+      - run: node --test sdk/node/src/index.test.js
+      - run: npm publish --provenance --access public
+        working-directory: sdk/node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  image:
+    name: image
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write, id-token: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          provenance: true
+          sbom: true
+
+      - name: trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+
+      - uses: sigstore/cosign-installer@v3
+      - name: sign
+        run: cosign sign --yes ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}

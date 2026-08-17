@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "Pluggable compliance rules and decision engine for fintechs"
 readme = "README.md"
 requires-python = "==3.12.*"
-license = { text = "UNLICENSED" }
+license = { text = "BUSL-1.1" }
 authors = [{ name = "ComplyLayer" }]
 keywords = ["compliance", "fintech", "aml", "kyc", "rules-engine"]
 

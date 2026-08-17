@@ -1,0 +1,14 @@
+{
+  "name": "@complylayer/node",
+  "version": "0.0.0",
+  "description": "Compliance decisions for Node. One call before you move money.",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": { ".": { "types": "./src/index.d.ts", "default": "./src/index.js" } },
+  "files": ["src"],
+  "engines": { "node": ">=20" },
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/nobledeveloper01/ComplyLayer.git" },
+  "scripts": { "test": "node --test src/*.test.js" }
+}

@@ -104,24 +104,47 @@ class DecisionHandler:
         evaluation pass and no lock to acquire: one round trip, one evaluation.
         """
         # The window is fetched first, because build_facts reads the aggregates
-        # it returns.
-        self._gather(transaction, now)
-        facts = self.build_facts(transaction, now)
-        context = EvaluationContext(facts=facts, functions=functions.build(self.velocity, now))
+        # it returns. If that fetch fails, `velocity` comes back as a provider
+        # that reports its own unavailability per rule rather than taking the
+        # decision down.
+        velocity = self._gather(transaction, now)
+        facts = self.build_facts(transaction, now, velocity)
+        context = EvaluationContext(facts=facts, functions=functions.build(velocity, now))
         return decide(self.ruleset, context, fallback=fallback), facts
 
-    def _gather(self, transaction: Transaction, now: datetime) -> None:
-        """The write path (D9). Windows count attempts, blocked ones included."""
+    def _gather(self, transaction: Transaction, now: datetime):
+        """The write path (D9). Windows count attempts, blocked ones included.
+
+        **A failure here degrades rather than raises**, which the chaos suite
+        found the hard way. §10.3's fallback originally covered a rule that could
+        not *evaluate*; it did not cover the fetch that feeds every velocity rule
+        at once. So a Redis outage propagated out of `decide()` and became a 500
+        — the one failure mode the whole fail-open/fail-closed design exists to
+        replace, and it would have looked like an outage rather than a degraded
+        decision.
+
+        On failure the provider is swapped for one whose velocity functions raise
+        `RuleEvaluationError`, which puts the outcome back where §10.3 wants it:
+        decided per rule, per severity, and recorded.
+        """
         gather = getattr(self.velocity, "record_and_gather", None)
-        if gather is not None:
+        if gather is None:
+            return self.velocity
+
+        try:
             gather(
                 transaction.transaction_ref,
                 transaction.amount_minor,
                 transaction.transaction_type,
                 now.timestamp(),
             )
+        except Exception as exc:
+            return UnavailableVelocity(exc)
+        return self.velocity
 
-    def build_facts(self, transaction: Transaction, now: datetime) -> dict[str, Any]:
+    def build_facts(
+        self, transaction: Transaction, now: datetime, velocity: Any = None
+    ) -> dict[str, Any]:
         """The entire namespace a rule can see for this transaction.
 
         Flat, because the DSL has no dot: `kyc_tier`, not `customer.kyc_tier`.
@@ -144,7 +167,9 @@ class DecisionHandler:
 
         # Aggregate facts about the customer's history, from the same fetch as
         # the rolling window — no second round trip.
-        aggregates = getattr(self.velocity, "aggregate_facts", None)
+        aggregates = getattr(
+            velocity if velocity is not None else self.velocity, "aggregate_facts", None
+        )
         if aggregates is not None:
             facts.update(aggregates())
 
@@ -172,6 +197,36 @@ class DecisionHandler:
             customer_ref_hash=hash_customer_ref(transaction.customer_ref, self.salt),
             ruleset_version=self.ruleset.version,
         )
+
+
+class UnavailableVelocity:
+    """Stands in when the velocity fetch failed.
+
+    Every call raises the same evaluation error, so each rule that needed a
+    window degrades on its own terms — fail-closed for `block`, fail-open for
+    `flag` — and each one is recorded. Rules that never asked for velocity are
+    untouched, which is what makes this a degraded service rather than an outage.
+    """
+
+    def __init__(self, cause: Exception):
+        self.cause = cause
+
+    def _unavailable(self, *args, **kwargs):
+        from complylayer.dsl.errors import RuleEvaluationError
+
+        raise RuleEvaluationError(f"velocity data is unavailable: {self.cause}")
+
+    count = _unavailable
+    total = _unavailable
+
+    def aggregate_facts(self) -> dict[str, int]:
+        """No aggregates rather than wrong ones.
+
+        A rule reading `lifetime_transaction_count` gets an unknown-fact error
+        and degrades, which is right: reporting zero would quietly turn every
+        established customer into a brand-new one during an outage.
+        """
+        return {}
 
 
 def _serialisable(facts: dict[str, Any]) -> dict[str, Any]:

@@ -283,7 +283,7 @@ engine is.
 
 ---
 
-## Phase 8 — Load, chaos, packaging, release
+## Phase 8 — Load, chaos, packaging, release ✅
 
 **Deliverables**
 - k6 at 2,000 decisions/sec with 100 active rules, run against a deployed staging environment on

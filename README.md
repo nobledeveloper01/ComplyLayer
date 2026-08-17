@@ -11,12 +11,12 @@ themselves — no engineer, no pull request, no deploy.
 
 <!-- phase: 8 -->
 
-## Status — phase 7 complete, phase 8 in progress
+## Status — all nine phases complete
 
-**A rule change is now safe to make.** Test a candidate rule against real history before activating
-it, watch it in shadow on live traffic without affecting anyone, and see which of your rules are
-spending a reviewer's week without catching anything. What is left is getting it out of the
-door: load and chaos testing, the SDK, packaging and deploy.
+**ComplyLayer decides, and it has been tested against the ways it fails.** Kill Redis and every
+`block` rule fails closed while every `flag` rule fails open, each one recorded. Kill a worker
+mid-decision and a retry returns the original answer rather than making a second one. It packages as
+a wheel, a container and a Node client, all released from one tag.
 
 | Phase | | What it delivers |
 |---|---|---|
@@ -28,7 +28,7 @@ door: load and chaos testing, the SDK, packaging and deploy.
 | 5 | ✅ | Management API, approval workflow, tenancy |
 | 6 | ✅ | The dashboard and rule builder |
 | 7 | ✅ | Backtest, shadow mode, review queue, analytics |
-| 8 | ⬜ | Load, chaos, packaging, release |
+| 8 | ✅ | Load, chaos, packaging, release |
 
 A phase is ticked when its exit gate in [`docs/ROADMAP.md`](docs/ROADMAP.md) is green in CI, not when
 it feels finished. Phases 0–4 are a shippable milestone: they deliver the sandbox, the itemised
@@ -36,6 +36,14 @@ latency budget, and reproducible decisions.
 
 ## What works today
 
+- **A documented failure mode that was executed rather than quoted.** The chaos suite kills Redis
+  and asserts §10.3's table line by line — and found a real bug doing it: a Redis outage during
+  *fact gathering* propagated out and would have returned a 500 instead of a degraded decision. That
+  is the exact failure the fail-open/fail-closed design exists to replace.
+- **Packaged three ways from one tag.** A wheel that carries its own dashboard (asserted in the
+  release job), a non-root container on a read-only rootfs, and a Node SDK whose `fallback` argument
+  is required with no default — because a silent default is one a fintech discovers during an
+  outage.
 - **A backtest that says what it does not know.** A rule over facts that were recorded gets an
   exact answer. A rule needing a fact nobody recorded gets no number at all and a pointer to shadow
   mode, because an approximate figure on the screen where somebody decides whether to loosen a
@@ -205,4 +213,11 @@ make ci
 
 ## Licence
 
-To be decided before the first public release.
+**Server and dashboard: [BUSL-1.1](LICENSE)**, converting to Apache-2.0 on
+2030-01-01. You may run it in production against your own organisation's
+transactions, self-hosted, including as a regulated entity. You may not offer it
+to third parties as a hosted compliance decisioning service.
+
+**Client libraries: [Apache-2.0](sdk/LICENSE).** Separate on purpose — integrating
+means importing a library into a regulated company's payment path, and a
+permissive licence there means that decision never has to reach their legal team.
