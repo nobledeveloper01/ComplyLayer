@@ -36,7 +36,15 @@ class FakeRedis:
 
 @contextmanager
 def doctor_environment(*, pg_version=160004, db_error=None, redis_client=None, now=1_700_000_000.0):
-    """Stand in for Postgres, Redis and the wall clock."""
+    """Stand in for Postgres, Redis, the wall clock and a configured deployment.
+
+    The last of those arrived with the deployment-secrets and transport checks:
+    a test run has DEBUG off and the published defaults still in place, which is
+    precisely the state those checks exist to fail. Setting them here keeps
+    "healthy" meaning healthy.
+    """
+    from django.test import override_settings
+
     connection = mock.MagicMock()
     connection.pg_version = pg_version
     if db_error is not None:
@@ -49,10 +57,19 @@ def doctor_environment(*, pg_version=160004, db_error=None, redis_client=None, n
         ]
         cursor.fetchone.return_value = ("complylayer_app", False, False)
 
+    from django.conf import settings as django_settings
+
     with (
         mock.patch(f"{MODULE}.connection", connection),
         mock.patch(f"{MODULE}.redis.Redis.from_url", return_value=redis_client or FakeRedis()),
         mock.patch(f"{MODULE}.time.time", return_value=now),
+        override_settings(
+            SECRET_KEY="a-configured-signing-key",  # noqa: S106
+            COMPLYLAYER={**django_settings.COMPLYLAYER, "CUSTOMER_SALT": "a-configured-salt"},
+            SESSION_COOKIE_SECURE=True,
+            CSRF_COOKIE_SECURE=True,
+            SECURE_HSTS_SECONDS=31_536_000,
+        ),
     ):
         yield
 

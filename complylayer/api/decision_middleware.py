@@ -176,7 +176,11 @@ class DecisionMiddleware:
             velocity_factory=lambda customer_hash: _velocity(
                 self.redis, credentials.tenant_id, customer_hash
             ),
-            salt=settings.COMPLYLAYER.get("CUSTOMER_SALT", credentials.tenant_id),
+            # No fallback. This used to default to the tenant id, which is
+            # stored on every row the hash protects — pseudonymisation whose key
+            # travels with the data it pseudonymises. Refused at boot instead;
+            # see server/settings.py and complylayer/checks.py.
+            salt=settings.COMPLYLAYER["CUSTOMER_SALT"],
         )
         return self.get_response(request)
 

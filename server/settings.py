@@ -19,9 +19,20 @@ def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
-# No usable default: a deployment that forgets to set this should fail loudly at
-# start rather than run on a key baked into a public repository.
-SECRET_KEY = _env("COMPLYLAYER_SECRET_KEY", "insecure-development-key-do-not-deploy")
+# These two are the development values, and they are named rather than inlined so
+# that three separate things can refuse them: `server/asgi.py` at boot,
+# `manage.py check --deploy`, and `complylayer_doctor`.
+#
+# The comment that used to sit here said a deployment forgetting to set the key
+# "should fail loudly at start". Nothing made it. The default is in a public
+# repository, Django signs session cookies with it, and the dashboard's
+# second-factor flag lives inside that signed session — so a forgotten
+# environment variable meant a forged cookie was a full dashboard login, with
+# every probe reporting healthy. Found by the phase 2-8 security review.
+INSECURE_SECRET_KEY = "insecure-development-key-do-not-deploy"  # noqa: S105
+INSECURE_CUSTOMER_SALT = "insecure-development-salt-do-not-deploy"
+
+SECRET_KEY = _env("COMPLYLAYER_SECRET_KEY", INSECURE_SECRET_KEY)
 DEBUG = _env("COMPLYLAYER_DEBUG", "0") == "1"
 ALLOWED_HOSTS = [
     h for h in _env("COMPLYLAYER_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h
@@ -91,6 +102,16 @@ DATABASE_ROUTERS = ["complylayer.db_router.ReadReplicaRouter"]
 # explicit rather than inferred.
 COMPLYLAYER = {
     "REDIS_URL": _env("COMPLYLAYER_REDIS_URL", "redis://127.0.0.1:6379/2"),
+    # The HMAC key that pseudonymises customer references before they are
+    # stored (§8.4). It used to fall back to the tenant id, which is a column on
+    # every row it protects — so the promise that "a stolen decisions table
+    # without the salt yields nothing" held against nobody. Customer references
+    # in this market are BVNs and phone numbers: an enumerable space, and a
+    # known key turns the whole table back into names.
+    #
+    # It belongs in a secret manager rather than beside the database, so that a
+    # database copy does not carry its own key.
+    "CUSTOMER_SALT": _env("COMPLYLAYER_CUSTOMER_SALT", INSECURE_CUSTOMER_SALT),
     # No default fallback anywhere in this product. §10.3 sets the per-severity
     # defaults; a tenant may override, but never implicitly.
     "DEFAULT_FALLBACK": {"block": "closed", "flag": "open"},
@@ -102,6 +123,30 @@ COMPLYLAYER = {
     # default: without it, propagation waits for a worker restart.
     "WATCH_RULESET_VERSIONS": _env("COMPLYLAYER_WATCH_VERSIONS", "1") == "1",
 }
+
+# The decision workload is a Bearer-token JSON API. It issues no cookie, reads
+# no session and renders no HTML, so the checks below are about a surface it does
+# not have. Silenced with reasons rather than by lowering the fail level, so that
+# `check --deploy` stays a gate: anything not listed here is a real finding.
+#
+# The management workload silences a different, shorter list — it does serve HTML
+# and does issue a session, so most of these genuinely apply there.
+SILENCED_SYSTEM_CHECKS = [
+    # X-Frame-Options: nothing here is ever rendered in a frame; the response is
+    # `application/json`. The dashboard, which does render, sets it to DENY.
+    "security.W002",
+    # CSRF middleware: there is no ambient authority to ride. Authentication is
+    # an `Authorization: Bearer` header, and a browser will not attach one on an
+    # attacker's behalf.
+    "security.W003",
+    # HSTS and SSL redirect: TLS terminates at the load balancer.
+    "security.W004",
+    "security.W008",
+    # SESSION_COOKIE_SECURE: this workload never issues a session cookie.
+    # `django.contrib.sessions` is installed only so the table exists when
+    # migrations run against the one database both workloads share.
+    "security.W010",
+]
 
 USE_TZ = True
 TIME_ZONE = "UTC"

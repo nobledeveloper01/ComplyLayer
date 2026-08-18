@@ -44,13 +44,36 @@ EXTRA_MIDDLEWARE = [
 ]
 
 
+# The security settings are read from the real module rather than restated here.
+# The rest of this fixture is a restatement, and it drifted exactly as this
+# file's docstring predicted: `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE` and
+# the HSTS pair were added to `server/settings_management.py` and no test saw
+# them, because the fixture had never heard of them. Anything a test needs to
+# assert about the management workload's security posture has to come from the
+# module that actually configures it.
+SECURITY_SETTINGS = (
+    "SESSION_COOKIE_AGE",
+    "SESSION_COOKIE_HTTPONLY",
+    "SESSION_COOKIE_SAMESITE",
+    "SESSION_COOKIE_SECURE",
+    "SESSION_EXPIRE_AT_BROWSER_CLOSE",
+    "CSRF_COOKIE_SECURE",
+    "SECURE_HSTS_SECONDS",
+    "SECURE_HSTS_INCLUDE_SUBDOMAINS",
+    "SECURE_PROXY_SSL_HEADER",
+)
+
+
 @pytest.fixture
 def management(settings):
     """The management workload's settings, as `server.settings_management` has them."""
     from complylayer.api import auth
+    from server import settings_management
 
     settings.ROOT_URLCONF = "server.urls_management"
     settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "rest_framework"]
+    for name in SECURITY_SETTINGS:
+        setattr(settings, name, getattr(settings_management, name))
     # Strip the decision middleware, exactly as `server/settings_management.py`
     # does. Leaving it in did two wrong things at once: authentication answered
     # 401 before DRF could answer 403, and every management test started a

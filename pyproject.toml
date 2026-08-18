@@ -104,6 +104,9 @@ ignore = [
 "complylayer/dashboard/diff.py" = ["RUF001", "RUF002"]
 # A test password is a test password.
 "tests/test_dashboard.py" = ["S603", "S105", "S106", "RUF001", "RUF002", "RUF012"]
+# Same: this file's whole subject is what the published default values are, so
+# it necessarily names them.
+"tests/test_checks_deployment.py" = ["S105", "S106"]
 # Tests shell out to the guard scripts on purpose, with arguments they construct
 # themselves.
 "tests/*" = ["S603", "RUF012"]

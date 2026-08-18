@@ -254,6 +254,119 @@ def check_rls_effective(
     )
 
 
+def check_deployment_secrets(
+    secret_key: str,
+    customer_salt: str,
+    debug: bool,
+    *,
+    insecure_secret_key: str,
+    insecure_customer_salt: str,
+) -> CheckResult:
+    """The two secrets whose development defaults are published in this repository.
+
+    Neither has ever announced itself. `SECRET_KEY` signs the session cookie,
+    and the dashboard's second-factor flag lives inside that session — so on the
+    default key a forged cookie is a full sign-in with both factors, and nothing
+    anywhere reports it. `CUSTOMER_SALT` used to fall back to the tenant id,
+    which is stored on every row it protects, which makes it not a key at all.
+
+    Fatal rather than a warning, unlike the row level security check. A superuser
+    connection is wrong but still isolates tenants through two other layers;
+    these two have nothing behind them.
+    """
+    unset = []
+    if secret_key == insecure_secret_key:
+        unset.append("COMPLYLAYER_SECRET_KEY")
+    if customer_salt == insecure_customer_salt:
+        unset.append("COMPLYLAYER_CUSTOMER_SALT")
+
+    if not unset:
+        return CheckResult(
+            name="deployment secrets",
+            ok=True,
+            detail="the signing key and the customer salt are both set",
+        )
+
+    named = ", ".join(unset)
+    if debug:
+        return CheckResult(
+            name="deployment secrets",
+            ok=False,
+            fatal=False,
+            detail=f"still on the development value: {named} (DEBUG is on)",
+            remediation="Fine for a laptop. `--strict` makes this fatal, which is what a deploy "
+            "pipeline should run.",
+        )
+
+    return CheckResult(
+        name="deployment secrets",
+        ok=False,
+        detail=f"still on the development value, and DEBUG is off: {named}",
+        remediation=(
+            "Generate both and set them in the environment:\n"
+            "      COMPLYLAYER_SECRET_KEY=$(python -c "
+            "'import secrets; print(secrets.token_urlsafe(64))')\n"
+            "      COMPLYLAYER_CUSTOMER_SALT=$(python -c "
+            "'import secrets; print(secrets.token_urlsafe(32))')\n"
+            "    Changing the salt later re-pseudonymises every future decision, so the "
+            "history stops joining to the new one. Set it once, keep it in a secret manager, "
+            "and back it up with the database."
+        ),
+    )
+
+
+def check_transport_security(
+    session_cookie_secure: bool,
+    csrf_cookie_secure: bool,
+    hsts_seconds: int,
+    debug: bool,
+    serves_sessions: bool = True,
+) -> CheckResult:
+    """A session cookie without `Secure` travels over plain HTTP.
+
+    The dashboard session carries the completed second factor, so one
+    intercepted request on a hostile network is both factors. The other cookie
+    flags were set and this one was not, which is the kind of omission that
+    reads as deliberate.
+
+    Only the management workload issues a session. Reporting this against a
+    decision worker would be a warning nobody can act on, and a preflight that
+    cries wolf is one people learn to skim — which is the failure mode this
+    whole command exists to avoid.
+    """
+    if not serves_sessions:
+        return CheckResult(
+            name="transport security",
+            ok=True,
+            detail="not applicable: this workload issues no session cookie",
+        )
+
+    missing = []
+    if not session_cookie_secure:
+        missing.append("SESSION_COOKIE_SECURE")
+    if not csrf_cookie_secure:
+        missing.append("CSRF_COOKIE_SECURE")
+    if hsts_seconds <= 0:
+        missing.append("SECURE_HSTS_SECONDS")
+
+    if not missing:
+        return CheckResult(
+            name="transport security",
+            ok=True,
+            detail="cookies are HTTPS-only and HSTS is set",
+        )
+
+    return CheckResult(
+        name="transport security",
+        ok=False,
+        fatal=not debug,
+        detail=f"not set: {', '.join(missing)}",
+        remediation="Serve the dashboard over HTTPS and set these. A session cookie without "
+        "Secure is one an attacker on the network reads in clear text, and it already "
+        "carries the second factor.",
+    )
+
+
 def summarise(results: list[CheckResult]) -> tuple[int, int]:
     """Return (failures, warnings). The exit code is the count of fatal failures."""
     failures = sum(1 for r in results if not r.ok and r.fatal)

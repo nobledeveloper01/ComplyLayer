@@ -99,6 +99,24 @@ jobs:
       - name: migrations are committed
         run: uv run python manage.py makemigrations --check --dry-run
 
+      # Both workloads, at WARNING, with every silence documented in the
+      # settings module that sets it. This was never run, which is how the
+      # dashboard reached phase 8 with no clickjacking protection on a page
+      # whose main control is an Approve button, and how the session cookie kept
+      # its four hardening flags and not the fifth.
+      #
+      # Real secrets rather than the published defaults: the point of the gate
+      # is the checks after that one, and `server/boot.py` already refuses the
+      # defaults at startup.
+      - name: deployment checks, both workloads
+        env:
+          COMPLYLAYER_SECRET_KEY: ${{ github.sha }}-ci-only-not-a-real-deployment-key
+          COMPLYLAYER_CUSTOMER_SALT: ${{ github.sha }}-ci-only-salt
+        run: |
+          uv run python manage.py check --deploy --fail-level WARNING
+          DJANGO_SETTINGS_MODULE=server.settings_management \
+            uv run python manage.py check --deploy --fail-level WARNING
+
       # Phase 5 and phase 2 respectively. Wired now for the same reason as above.
       - name: tenant isolation
         run: |

@@ -79,13 +79,22 @@ class TestThePrefixIdentifiesAKeyAndDoesNotAuthenticateOne:
         second = auth.authenticate(f"Bearer {full_key}")
         assert first == second
 
-    def test_two_keys_sharing_a_prefix_do_not_share_an_identity(self):
+    def test_a_key_differing_only_in_its_last_character_is_refused(self):
         """Contrived, because the prefix is unique — but it is the property that
-        was actually broken, and a unique index is not the reason it is safe."""
+        was actually broken, and a unique index is not the reason it is safe.
+
+        The substitute character is derived rather than fixed: `"Z"` produced an
+        identical key whenever the real one already ended in Z, which is one run
+        in sixty-four and duly failed on about the tenth.
+        """
         full_key, _ = issue()
         auth.authenticate(f"Bearer {full_key}")
+
+        altered = full_key[:-1] + ("A" if full_key[-1] != "A" else "B")
+        assert altered != full_key
+
         with pytest.raises(auth.AuthenticationFailed):
-            auth.authenticate(f"Bearer {full_key[:-1]}Z")
+            auth.authenticate(f"Bearer {altered}")
 
     def test_the_cache_is_not_keyed_on_anything_shorter_than_the_whole_key(self):
         """A guard on the shape of the fix rather than on its effect: every

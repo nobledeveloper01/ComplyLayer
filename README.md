@@ -94,6 +94,16 @@ latency budget, and reproducible decisions.
   is cached for a minute against a digest of the *entire* presented key, and the row itself is read
   every request, so revoking a key stops it on its next call rather than whenever a cache happens to
   expire. Both properties are held down by the exploits that used to work against them.
+- **A server that refuses to start on the secrets published in this repository.** `SECRET_KEY`
+  signs the session cookie and the dashboard's second-factor flag lives inside it, so on the default
+  key a forged cookie is a complete sign-in — with every health probe green throughout.
+  `COMPLYLAYER_CUSTOMER_SALT` is the HMAC key pseudonymising customer references; it used to fall
+  back to the tenant id, a column on every row it protects, which made §8.4's promise that "a stolen
+  decisions table without the salt yields nothing" true of nobody. Both are now refused at boot by
+  [server/boot.py](server/boot.py), reported by `complylayer_doctor`, and gated in CI by
+  `manage.py check --deploy --fail-level WARNING` — which had never been run, and which is how the
+  dashboard reached phase 8 with no clickjacking protection on the page whose main control is an
+  Approve button.
 - **A versioned rule cache with no database on the decision path.** Each worker compiles the rule
   set into memory and swaps it atomically. Propagation does not depend on pub/sub staying connected:
   there is a poll as well, and [the test that matters](tests/test_ruleset_cache.py) severs the

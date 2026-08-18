@@ -34,6 +34,8 @@ class Command(BaseCommand):
         results.append(self._clock_skew(client))
         results.append(self._audit_immutability())
         results.append(self._row_level_security())
+        results.append(self._deployment_secrets())
+        results.append(self._transport_security())
 
         width = max(len(r.name) for r in results)
         for r in results:
@@ -80,6 +82,36 @@ class Command(BaseCommand):
         except Exception as exc:
             return checks.check_audit_immutability(None, error=exc)
         return checks.check_audit_immutability(names)
+
+    def _deployment_secrets(self):
+        """The two secrets whose development values are published in this repo.
+
+        Read from settings rather than the environment, so the check sees what
+        the process is actually running on rather than what somebody meant to
+        export.
+        """
+        return checks.check_deployment_secrets(
+            settings.SECRET_KEY,
+            settings.COMPLYLAYER["CUSTOMER_SALT"],
+            settings.DEBUG,
+            insecure_secret_key=settings.INSECURE_SECRET_KEY,
+            insecure_customer_salt=settings.INSECURE_CUSTOMER_SALT,
+        )
+
+    def _transport_security(self) -> checks.CheckResult:
+        """Asked of the workload actually running, not of the project.
+
+        A decision worker has no SessionMiddleware and issues no cookie, so the
+        flags are not merely unset there, they are meaningless.
+        """
+        serves_sessions = any("SessionMiddleware" in m for m in settings.MIDDLEWARE)
+        return checks.check_transport_security(
+            bool(getattr(settings, "SESSION_COOKIE_SECURE", False)),
+            bool(getattr(settings, "CSRF_COOKIE_SECURE", False)),
+            int(getattr(settings, "SECURE_HSTS_SECONDS", 0) or 0),
+            settings.DEBUG,
+            serves_sessions=serves_sessions,
+        )
 
     def _row_level_security(self) -> checks.CheckResult:
         try:
