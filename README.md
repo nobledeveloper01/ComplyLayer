@@ -94,6 +94,15 @@ latency budget, and reproducible decisions.
   is cached for a minute against a digest of the *entire* presented key, and the row itself is read
   every request, so revoking a key stops it on its next call rather than whenever a cache happens to
   expire. Both properties are held down by the exploits that used to work against them.
+- **A second factor that costs something to guess.** Six digits with a one-step window is three
+  chances in a million, so even odds need about 231,000 attempts — nineteen minutes at 200 requests
+  a second, which is what "no rate limiting anywhere" bought. Backoff doubles to a fifteen-minute
+  cap, taking that to roughly fifteen months, and every lockout on the way is something to alert on.
+  Codes are single-use for their validity window, so one read over a shoulder does not work twice.
+  Passwords are throttled on the same mechanism, because a guarded second factor in front of a free
+  first one just moves the problem. The arithmetic is
+  [computed in the test](tests/test_throttle.py) rather than asserted in a comment — the first
+  version of that claim said "centuries" and was wrong by two orders of magnitude.
 - **A server that refuses to start on the secrets published in this repository.** `SECRET_KEY`
   signs the session cookie and the dashboard's second-factor flag lives inside it, so on the default
   key a forged cookie is a complete sign-in — with every health probe green throughout.

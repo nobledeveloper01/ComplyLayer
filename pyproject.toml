@@ -107,6 +107,7 @@ ignore = [
 # Same: this file's whole subject is what the published default values are, so
 # it necessarily names them.
 "tests/test_checks_deployment.py" = ["S105", "S106"]
+"tests/test_throttle.py" = ["S105", "S106"]
 # Tests shell out to the guard scripts on purpose, with arguments they construct
 # themselves.
 "tests/*" = ["S603", "RUF012"]

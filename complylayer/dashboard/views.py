@@ -8,10 +8,11 @@ server rendering.
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.http import Http404, JsonResponse
 from django.shortcuts import redirect, render
 
-from complylayer.dashboard import states
+from complylayer.dashboard import states, throttle
 from complylayer.dashboard.auth import (
     SignInFailed,
     begin_enrolment,
@@ -50,17 +51,61 @@ def _chrome(request) -> dict:
 # ── Signing in ────────────────────────────────────────────────────────────
 
 
+def _throttle_client():
+    """Redis, or None. None disables the throttle rather than the sign-in.
+
+    Built per request rather than at import because a connection created before
+    gunicorn forks is shared across children (D12).
+    """
+    try:
+        import redis
+
+        return redis.Redis.from_url(settings.COMPLYLAYER["REDIS_URL"])
+    except Exception:  # pragma: no cover - a misconfigured URL, not a live outage
+        return None
+
+
 def sign_in(request):
+    """Password, throttled.
+
+    Throttling the second factor and not this one would leave the account's
+    first factor free to guess, which just moves the problem.
+    """
     if request.method == "POST":
+        email = request.POST.get("email", "")
+        client = _throttle_client()
+
+        waiting = throttle.lockout_seconds(client, "sign-in", email)
+        if waiting:
+            return render(
+                request,
+                "complylayer/sign_in.html",
+                {"error": throttle.wait_message(waiting)},
+                status=429,
+            )
+
         try:
-            start_session(request, request.POST.get("email", ""), request.POST.get("password", ""))
+            start_session(request, email, request.POST.get("password", ""))
         except SignInFailed as exc:
+            throttle.record_failure(client, "sign-in", email)
             return render(request, "complylayer/sign_in.html", {"error": str(exc)}, status=401)
+
+        throttle.clear(client, "sign-in", email)
         return redirect("dashboard:verify")
     return render(request, "complylayer/sign_in.html", {})
 
 
 def verify(request):
+    """The second factor, throttled and single-use.
+
+    Six digits with `valid_window=1` is three chances in a million per attempt,
+    so even odds take about 231,000 guesses. Unthrottled at a modest 200
+    requests a second that is nineteen minutes; at twenty guesses an hour it is
+    about fifteen months, and every lockout along the way is something to alert
+    on. The replay guard closes the other door — a TOTP code stays valid for its
+    whole window, so one seen over a shoulder works again until the window
+    rolls.
+    """
     profile = current_profile(request)
     if profile is None:
         return redirect("dashboard:sign-in")
@@ -68,8 +113,25 @@ def verify(request):
         return redirect("dashboard:enrol")
 
     if request.method == "POST":
-        if verify_second_factor(request, profile, request.POST.get("code", "")):
+        client = _throttle_client()
+        identity = str(profile.pk)
+
+        waiting = throttle.lockout_seconds(client, "second-factor", identity)
+        if waiting:
+            return render(
+                request,
+                "complylayer/verify.html",
+                {"error": throttle.wait_message(waiting)},
+                status=429,
+            )
+
+        code = request.POST.get("code", "")
+        fresh = throttle.consume_code(client, identity, code)
+        if fresh and verify_second_factor(request, profile, code):
+            throttle.clear(client, "second-factor", identity)
             return redirect("dashboard:rules")
+
+        throttle.record_failure(client, "second-factor", identity)
         return render(
             request,
             "complylayer/verify.html",
