@@ -95,6 +95,25 @@ deleted after. Cheaper than shipping it.
 
 ---
 
+## D13 — The rule cache loads from the primary, not the replica
+
+**Problem, found while wiring the decision path.** §11.1 says analytics never touch the database
+serving decisions, so the first version of the rule-set loader read from the replica.
+
+**That was wrong.** A replica lags, and this is the one read where lag becomes a compliance problem
+rather than a stale dashboard: a worker that loads version 46 because the replica has not caught up
+is serving decisions against a control that was retired. That is precisely the version skew §11.6
+pages on, arriving by design instead of by accident.
+
+**Decision.** The rule-set load goes to the primary. §11.1's concern is backtests, reports and
+dashboard queries — big, frequent, and tolerant of a second's lag. This is one indexed row per
+version change per worker, on the path that decides what is in force.
+
+**Consequence.** The primary serves a small extra query whenever a version changes. Backtests,
+reports and analytics still read the replica, which is where the volume actually is.
+
+---
+
 ## D3 — The audit write is asynchronous through a local durable queue, not through Redis
 
 **Problem.** §4.2 says the audit write is queued and reconciled on startup, without saying what the

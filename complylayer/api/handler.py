@@ -41,12 +41,26 @@ class DecisionHandler:
     here needs to change when they arrive.
     """
 
-    def __init__(self, tenant_id: str, ruleset: RuleSet, store, velocity=None, salt: str = "salt"):
+    def __init__(
+        self,
+        tenant_id: str,
+        ruleset: RuleSet,
+        store,
+        velocity=None,
+        velocity_factory=None,
+        salt: str = "salt",
+    ):
         self.tenant_id = tenant_id
         self.ruleset = ruleset
         self.store = store
+        # `velocity` is one provider for every transaction, which suits a test.
+        # `velocity_factory` builds one per customer, which is what production
+        # needs — Redis keys are scoped per customer, and the handler does not
+        # know which customer until a request arrives.
         self.velocity = velocity
+        self.velocity_factory = velocity_factory
         self.salt = salt
+        self._provider = velocity
 
     def replay(self, idempotency_key: str) -> dict[str, Any] | None:
         """The original response, verbatim, or None.
@@ -107,6 +121,10 @@ class DecisionHandler:
         # it returns. If that fetch fails, `velocity` comes back as a provider
         # that reports its own unavailability per rule rather than taking the
         # decision down.
+        self._provider = self.velocity
+        if self._provider is None and self.velocity_factory is not None:
+            self._provider = self.velocity_factory(customer_hash)
+
         velocity = self._gather(transaction, now)
         facts = self.build_facts(transaction, now, velocity)
         context = EvaluationContext(facts=facts, functions=functions.build(velocity, now))
@@ -127,9 +145,10 @@ class DecisionHandler:
         `RuleEvaluationError`, which puts the outcome back where §10.3 wants it:
         decided per rule, per severity, and recorded.
         """
-        gather = getattr(self.velocity, "record_and_gather", None)
+        provider = self._provider
+        gather = getattr(provider, "record_and_gather", None)
         if gather is None:
-            return self.velocity
+            return provider
 
         try:
             gather(

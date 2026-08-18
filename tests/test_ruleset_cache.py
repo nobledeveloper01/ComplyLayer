@@ -332,7 +332,7 @@ class TestReadiness:
 
 
 @pytest.fixture
-def client(cache, monkeypatch):
+def client(cache, monkeypatch, view_only):
     from django.core.handlers.base import BaseHandler
     from django.test import Client
 

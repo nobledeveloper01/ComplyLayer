@@ -51,10 +51,36 @@ def management(settings):
 
     settings.ROOT_URLCONF = "server.urls_management"
     settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "rest_framework"]
-    settings.MIDDLEWARE = [*settings.MIDDLEWARE, *EXTRA_MIDDLEWARE]
+    # Strip the decision middleware, exactly as `server/settings_management.py`
+    # does. Leaving it in did two wrong things at once: authentication answered
+    # 401 before DRF could answer 403, and every management test started a
+    # version-watcher thread that then polled a database the test was about to
+    # roll back — surfacing as unrelated failures in whichever test happened to
+    # be running when the thread raised.
+    settings.MIDDLEWARE = [
+        *[m for m in settings.MIDDLEWARE if "decision_middleware" not in m],
+        *EXTRA_MIDDLEWARE,
+    ]
     settings.TEMPLATES = TEMPLATES
     settings.REST_FRAMEWORK = REST_FRAMEWORK
 
     auth.clear_cache()
     yield settings
     auth.clear_cache()
+
+
+@pytest.fixture
+def view_only(settings):
+    """Settings without the decision middleware.
+
+    For suites that test a *view* by attaching its dependencies themselves. The
+    middleware now owns `decision_handler` and `ruleset_cache` and correctly
+    overwrites anything a test put there — which is the whole point of it
+    existing, and the reason those attributes were missing in production for
+    eight phases.
+
+    The integrated path is covered by `tests/test_decision_wiring.py`, which
+    attaches nothing.
+    """
+    settings.MIDDLEWARE = [m for m in settings.MIDDLEWARE if "decision_middleware" not in m]
+    return settings

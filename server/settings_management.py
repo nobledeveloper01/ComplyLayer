@@ -36,7 +36,10 @@ SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 MIDDLEWARE = [
-    *MIDDLEWARE,  # noqa: F405
+    # The decision middleware is dropped here: a management worker has no
+    # decision endpoint to serve, and warming a decision rule cache on it would
+    # spend memory on something it never reads (D7).
+    *[m for m in MIDDLEWARE if "decision_middleware" not in m],  # noqa: F405
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",

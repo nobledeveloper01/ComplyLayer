@@ -67,7 +67,7 @@ def store() -> InMemoryStore:
 
 
 @pytest.fixture
-def client(store, monkeypatch) -> Client:
+def client(store, monkeypatch, view_only) -> Client:
     """Attaches a handler to each request, standing in for the auth middleware
     that resolves an API key to exactly one tenant in phase 5."""
     handler = DecisionHandler("tnt_test", ruleset(), store)

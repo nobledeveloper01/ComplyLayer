@@ -45,6 +45,11 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
+    # Resolves the API key, warms this worker's rule cache and attaches the
+    # handler. Without it the decision endpoint has nothing to decide with —
+    # which is exactly how it shipped un-wired through eight phases of green
+    # tests. See complylayer/api/decision_middleware.py.
+    "complylayer.api.decision_middleware.DecisionMiddleware",
 ]
 
 STATIC_URL = "static/"
@@ -93,6 +98,9 @@ COMPLYLAYER = {
     "MAX_RULE_NODES": 200,
     "MAX_RULE_SOURCE_CHARS": 2000,
     "DECISION_TIMEOUT_MS": 150,
+    # The background thread that keeps each worker's rule cache current. On by
+    # default: without it, propagation waits for a worker restart.
+    "WATCH_RULESET_VERSIONS": _env("COMPLYLAYER_WATCH_VERSIONS", "1") == "1",
 }
 
 USE_TZ = True

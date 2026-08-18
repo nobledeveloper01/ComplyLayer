@@ -13,10 +13,10 @@ themselves — no engineer, no pull request, no deploy.
 
 ## Status — all nine phases complete
 
-**ComplyLayer decides, and it has been tested against the ways it fails.** Kill Redis and every
-`block` rule fails closed while every `flag` rule fails open, each one recorded. Kill a worker
-mid-decision and a retry returns the original answer rather than making a second one. It packages as
-a wheel, a container and a Node client, all released from one tag.
+**ComplyLayer decides — verified by running it, not only by testing it.** `POST /v1/decisions`
+against a live server returns `block` in 20 ms with the reason, the regulation and the message
+compliance wrote. Kill Redis and every `block` rule fails closed while every `flag` rule fails open,
+each one recorded. It packages as a wheel, a container and a Node client, released from one tag.
 
 | Phase | | What it delivers |
 |---|---|---|
@@ -36,6 +36,10 @@ latency budget, and reproducible decisions.
 
 ## What works today
 
+- **Wiring proved by use.** The decision endpoint is exercised end to end through the real
+  middleware stack with nothing attached by hand ([the test](tests/test_decision_wiring.py)), because
+  832 green tests once sat on top of an endpoint that raised `AttributeError` on its first real
+  request — every one of them supplied the dependency nobody had built.
 - **A documented failure mode that was executed rather than quoted.** The chaos suite kills Redis
   and asserts §10.3's table line by line — and found a real bug doing it: a Redis outage during
   *fact gathering* propagated out and would have returned a 500 instead of a degraded decision. That
