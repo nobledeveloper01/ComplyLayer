@@ -56,7 +56,9 @@ fi
 # 'Try it' has to carry something. An empty section is how a README starts
 # rotting, and it rots from this section first.
 if [ "$current" -gt 0 ]; then
-  if ! awk '/^## Try it$/{f=1;next} /^## /{f=0} f && NF {found=1} END{exit !found}' "$README"; then
+  # The heading may carry a section number ("## 4. Try it"); the requirement is
+  # that the section exists and has something runnable in it.
+  if ! awk '/^## ([0-9]+\. )?Try it$/{f=1;next} /^## /{f=0} f && NF {found=1} END{exit !found}' "$README"; then
     fail "README.md's 'Try it' section is empty at phase $current.
   Every phase from 0 onward must leave behind a command sequence that runs."
   fi

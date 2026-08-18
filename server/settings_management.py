@@ -1,6 +1,6 @@
 """Settings for the management workload.
 
-The same image as the decision workload, chosen by COMPLYLAYER_ROLE. This module
+The same image as the decision workload, chosen by DJANGO_SETTINGS_MODULE. This
 is the whole of D7's separation: it mounts the management URLconf, which the
 decision settings never do — so a decision worker has no route to rule
 management, and a heavy backtest cannot be scheduled onto a pod serving the

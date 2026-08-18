@@ -225,8 +225,14 @@ belongs. The expressiveness lost is smaller than the reproducibility gained.
 ## D7 — One image, two workloads, and the separation is real
 
 Decision pods and management pods run the same container image and differ only by
-`COMPLYLAYER_ROLE`. The role selects the settings module, and the settings module selects the
-URLconf. A decision pod has no route to `POST /v1/rules/{id}/activate` — not a 403, no such URL.
+`DJANGO_SETTINGS_MODULE` — `server.settings` or `server.settings_management`. The settings module
+selects the URLconf.
+
+**This entry said `COMPLYLAYER_ROLE` until the README was rewritten**, and so did the Dockerfile
+and `settings_management.py`. No such variable was ever implemented. Nothing broke, because the
+deployment commands set `DJANGO_SETTINGS_MODULE` directly and always had — but three documents
+described a mechanism that did not exist, which is the same failure as a control that does not run,
+in the one place a reader has to trust. A decision pod has no route to `POST /v1/rules/{id}/activate` — not a 403, no such URL.
 Management pods do not register the decision route, so a heavy backtest cannot be scheduled onto a
 pod serving the critical path.
 

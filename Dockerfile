@@ -1,9 +1,13 @@
 # Multi-stage, slim, non-root, read-only rootfs. §11.8.
 #
 # The decision and management workloads share this image and differ only by
-# COMPLYLAYER_ROLE, which selects a settings module. One image means one thing
-# to scan, sign and audit — and it means a decision worker and a management
-# worker cannot drift into being built differently.
+# DJANGO_SETTINGS_MODULE: `server.settings` or `server.settings_management`.
+# One image means one thing to scan, sign and audit — and it means a decision
+# worker and a management worker cannot drift into being built differently.
+#
+# An earlier version of this comment named a COMPLYLAYER_ROLE variable that was
+# never implemented, which is the kind of thing a reader only discovers when
+# their deployment does not do what the comment said.
 
 FROM python:3.12-slim-bookworm AS build
 
