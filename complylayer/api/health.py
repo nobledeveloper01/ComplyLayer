@@ -10,6 +10,9 @@ traffic and every early request pays for the compile.
 
 from __future__ import annotations
 
+import hmac
+
+from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 
 from complylayer.api.decision import json_response
@@ -46,6 +49,35 @@ def metrics_view(request: HttpRequest) -> HttpResponse:
     A scrape reaches exactly one worker. Without the shared half, the metric
     built to detect disagreement between workers could never see more than one
     of them.
+
+    **Every series is labelled by tenant, so this is a customer list.** It is
+    served on the same port as `/v1/decisions` and exempt from authentication,
+    which meant anyone who could reach the API could read the identifiers of
+    every fintech using ComplyLayer, along with each one's rule set version and
+    how often it changes. For a compliance vendor that is commercially damaging
+    on its own and tells an attacker exactly who to go after.
+
+    A bearer token is required unless one is not configured — a single-process
+    self-hoster on a laptop should not have to set one up to see their own
+    numbers, and Prometheus supports `bearer_token_file` in a scrape config,
+    which is the one line this costs an operator. Compared in constant time
+    because the alternative leaks the token a character at a time.
     """
+    expected = settings.COMPLYLAYER.get("METRICS_TOKEN") or ""
+    if expected:
+        presented = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if not hmac.compare_digest(presented, expected):
+            return json_response(
+                {
+                    "error": "unauthorized",
+                    "message": (
+                        "Metrics carry tenant identifiers. Send the scrape token as "
+                        "`Authorization: Bearer ...` — Prometheus does this with "
+                        "`bearer_token_file` in the scrape config."
+                    ),
+                },
+                status=401,
+            )
+
     client = getattr(request, "metrics_client", None)
     return HttpResponse(metrics.render(client), content_type="text/plain; version=0.0.4")

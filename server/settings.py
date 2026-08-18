@@ -112,6 +112,12 @@ COMPLYLAYER = {
     # It belongs in a secret manager rather than beside the database, so that a
     # database copy does not carry its own key.
     "CUSTOMER_SALT": _env("COMPLYLAYER_CUSTOMER_SALT", INSECURE_CUSTOMER_SALT),
+    # Metrics are labelled by tenant, which makes /metrics a customer list, and
+    # it is served on the same port as the decision endpoint. Unset means open,
+    # because a self-hoster reading their own numbers on a laptop should not
+    # have to configure a token first — but any deployment reachable by anyone
+    # else should set one. Prometheus sends it with `bearer_token_file`.
+    "METRICS_TOKEN": _env("COMPLYLAYER_METRICS_TOKEN", ""),
     # No default fallback anywhere in this product. §10.3 sets the per-severity
     # defaults; a tenant may override, but never implicitly.
     "DEFAULT_FALLBACK": {"block": "closed", "flag": "open"},

@@ -3,6 +3,15 @@ name: release
 # One tag, both packages. The Python package and the Node SDK are versioned
 # together and released from the same tag, so a customer never has to work out
 # which client version speaks to which server.
+#
+# **Every action is pinned to a commit, not a tag or a branch.** A tag can be
+# moved and a branch moves by definition; `aquasecurity/trivy-action@master` was
+# tracking a moving branch inside the one job holding `packages: write` and a
+# Sigstore signing identity. A commit landing upstream would have had the run
+# push a backdoored image to ghcr and sign it with this project's own identity,
+# so provenance and signature verification would both have passed for everyone
+# downstream. Bumps come through Dependabot (.github/dependabot.yml) as pull
+# requests somebody reads.
 on:
   push:
     tags: ["v*"]
@@ -36,8 +45,8 @@ jobs:
       COMPLYLAYER_DB_HOST: 127.0.0.1
       COMPLYLAYER_REDIS_URL: redis://127.0.0.1:6379/2
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with: { version: "0.11.26", enable-cache: true }
       - run: uv sync --frozen
 
@@ -61,8 +70,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with: { version: "0.11.26" }
       - run: uv build
       # The wheel must carry the templates and CSS, or `pip install complylayer`
@@ -72,7 +81,7 @@ jobs:
         run: |
           python -m zipfile -l dist/*.whl | grep -q 'complylayer/templates/complylayer/builder.html'
           python -m zipfile -l dist/*.whl | grep -q 'complylayer/static/complylayer/tokens.css'
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
 
   node:
     name: npm
@@ -80,8 +89,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: "20", registry-url: "https://registry.npmjs.org" }
       - run: node --test sdk/node/src/index.test.js
       - run: npm publish --provenance --access public
@@ -95,15 +104,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions: { contents: read, packages: write, id-token: write }
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         id: build
         with:
           context: .
@@ -113,12 +122,12 @@ jobs:
           sbom: true
 
       - name: trivy
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297 # master
         with:
           image-ref: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
           exit-code: "1"
           severity: HIGH,CRITICAL
 
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
       - name: sign
         run: cosign sign --yes ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}

@@ -1,0 +1,23 @@
+# Pinning actions to a SHA stops a compromised upstream from walking into a job
+# that has `packages: write` and a signing identity. It also stops security
+# updates arriving, which is why this file exists: the pins are bumped by pull
+# request, where somebody reads the diff, rather than silently at run time.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /sdk/node
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
