@@ -25,7 +25,10 @@ import pyotp
 from django.contrib.auth import authenticate as django_authenticate
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
+from django.db import connection
 from django.shortcuts import redirect
+
+from complylayer.tenancy import tenant_scope
 
 SESSION_FACTOR_KEY = "complylayer_second_factor"
 ISSUER = "ComplyLayer"
@@ -55,7 +58,14 @@ def start_session(request, email: str, password: str):
     if user is None:
         raise SignInFailed("That email address and password do not match.")
 
-    profile = DashboardUser.objects.filter(user=user).select_related("tenant").first()
+    resolved = _resolve(user.pk)
+    profile = None
+    if resolved is not None:
+        profile_id, tenant_id = resolved
+        with tenant_scope(tenant_id):
+            profile = (
+                DashboardUser.objects.filter(pk=profile_id).select_related("tenant", "user").first()
+            )
     if profile is None:
         # A Django user with no ComplyLayer profile has no tenant, so there is
         # nothing they could be authorised to see.
@@ -116,7 +126,11 @@ def begin_enrolment(profile) -> tuple[str, str]:
     if profile.totp_secret != secret or profile.totp_confirmed_at is not None:
         profile.totp_secret = secret
         profile.totp_confirmed_at = None
-        profile.save(update_fields=["totp_secret", "totp_confirmed_at"])
+        # Scoped because the row level security policy's WITH CHECK refuses a
+        # write with no tenant set, and enrolment runs before any view has
+        # established one.
+        with tenant_scope(profile.tenant_id):
+            profile.save(update_fields=["totp_secret", "totp_confirmed_at"])
 
     uri = pyotp.TOTP(secret).provisioning_uri(name=profile.user.email, issuer_name=ISSUER)
     return secret, uri
@@ -126,7 +140,8 @@ def confirm_enrolment(profile, code: str) -> bool:
     if not profile.totp_secret or not pyotp.TOTP(profile.totp_secret).verify(code, valid_window=1):
         return False
     profile.totp_confirmed_at = datetime.now(UTC)
-    profile.save(update_fields=["totp_confirmed_at"])
+    with tenant_scope(profile.tenant_id):
+        profile.save(update_fields=["totp_confirmed_at"])
     return True
 
 
@@ -134,12 +149,35 @@ def sign_out(request) -> None:
     django_logout(request)
 
 
+def _resolve(user_id) -> tuple | None:
+    """Find which profile and tenant a signed-in Django user belongs to.
+
+    Goes through `complylayer_resolve_dashboard_user` rather than the ORM, for
+    the same reason the API key lookup does (migration 0009): this is the query
+    that *determines* the tenant, so it cannot be scoped by one. It returns the
+    pk and the tenant id only — enough to open a real scope and then query
+    normally, and not enough to hand out a `totp_secret` through an exemption.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT id, tenant_id FROM complylayer_resolve_dashboard_user(%s)", [user_id]
+        )
+        return cursor.fetchone()
+
+
 def current_profile(request):
     from complylayer.models import DashboardUser
 
     if not request.user.is_authenticated:
         return None
-    return DashboardUser.objects.filter(user=request.user).select_related("tenant").first()
+
+    resolved = _resolve(request.user.pk)
+    if resolved is None:
+        return None
+
+    profile_id, tenant_id = resolved
+    with tenant_scope(tenant_id):
+        return DashboardUser.objects.filter(pk=profile_id).select_related("tenant", "user").first()
 
 
 def signed_in(view):
@@ -161,6 +199,10 @@ def signed_in(view):
             return redirect("dashboard:verify")
 
         request.profile = profile
-        return view(request, *args, **kwargs)
+        # The whole view runs scoped, so a query inside it that forgets its own
+        # tenant filter returns nothing rather than everything. Before this,
+        # nothing in the request path called `tenant_scope` at all.
+        with tenant_scope(profile.tenant_id):
+            return view(request, *args, **kwargs)
 
     return wrapper

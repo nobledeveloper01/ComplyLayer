@@ -31,7 +31,16 @@ TENANT_SCOPED_TABLES = [
     "complylayer_auditrecord",
     "complylayer_namedlist",
     "complylayer_apikey",
+    # complylayer_dashboarduser is scoped too, from migration 0009 — it is not
+    # listed here because this migration has already run everywhere and its SQL
+    # must not change. `TENANT_SCOPED_TABLES` is the list of *every* scoped
+    # table, which tests/test_rls_every_table.py checks against the models, so
+    # it is extended rather than the operations below.
+    "complylayer_dashboarduser",
 ]
+
+# What migration 0005 itself created. The list above grew afterwards.
+INITIAL_TABLES = TENANT_SCOPED_TABLES[:-1]
 
 
 def _enable(table: str) -> str:
@@ -62,5 +71,5 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunSQL(sql=_enable(table), reverse_sql=_disable(table))
-        for table in TENANT_SCOPED_TABLES
+        for table in INITIAL_TABLES
     ]

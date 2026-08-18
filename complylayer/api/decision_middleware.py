@@ -33,6 +33,7 @@ from complylayer.api.auth import AuthenticationFailed, authenticate
 from complylayer.api.handler import DecisionHandler
 from complylayer.api.store import DatabaseStore
 from complylayer.engine import RuleSetCache, VersionWatcher, metrics
+from complylayer.tenancy import tenant_scope
 
 EXEMPT_PATHS = frozenset({"/healthz", "/readyz", "/metrics"})
 
@@ -59,13 +60,21 @@ def _load_published(tenant_id: str):
     §11.1 is about backtests, reports and dashboard queries: big, frequent, and
     tolerant of a second's lag. This is one indexed row per version change per
     worker. It belongs on the primary.
+
+    **Scoped here rather than by the middleware**, because the middleware is not
+    the only caller: `VersionWatcher` polls this from a background thread that
+    has no request and therefore no request-level scope. A read that works on
+    the request path and returns nothing on the poller would mean a worker
+    silently stopped picking up new versions — the exact skew §11.6 pages on,
+    and invisible because an empty result is not an error.
     """
     from complylayer.models import RuleSetVersion
 
-    snapshot = RuleSetVersion.objects.filter(tenant_id=tenant_id).order_by("-version").first()
-    if snapshot is None:
-        return None
-    return snapshot.version, snapshot.rules_snapshot, snapshot.lists_snapshot
+    with tenant_scope(tenant_id):
+        snapshot = RuleSetVersion.objects.filter(tenant_id=tenant_id).order_by("-version").first()
+        if snapshot is None:
+            return None
+        return snapshot.version, snapshot.rules_snapshot, snapshot.lists_snapshot
 
 
 def cache_for(tenant_id: str, client: Any = None) -> RuleSetCache:
@@ -182,7 +191,20 @@ class DecisionMiddleware:
             # see server/settings.py and complylayer/checks.py.
             salt=settings.COMPLYLAYER["CUSTOMER_SALT"],
         )
-        return self.get_response(request)
+
+        # **Layer three is switched on here, and was switched on nowhere.**
+        # `tenant_scope` had no caller outside the test suite, so
+        # `current_setting('complylayer.tenant_id')` was NULL on every real
+        # request. As a superuser that goes unnoticed, because policies are
+        # skipped; as `complylayer_app` it means every policy matches nothing
+        # and the endpoint authenticates and then finds no rule set. Row level
+        # security was not merely inert, it could not be turned on.
+        #
+        # Wrapping the request costs one short transaction — this path writes
+        # the decision and its idempotency record at the end anyway, and the
+        # measured cost is in tests/test_decision_benchmark.py.
+        with tenant_scope(credentials.tenant_id):
+            return self.get_response(request)
 
 
 def _velocity(client, tenant_id: str, customer_hash: str):

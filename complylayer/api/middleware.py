@@ -10,6 +10,7 @@ from __future__ import annotations
 from django.http import JsonResponse
 
 from complylayer.api.auth import AuthenticationFailed, authenticate
+from complylayer.tenancy import tenant_scope
 
 EXEMPT_PATHS = frozenset({"/healthz", "/readyz", "/metrics"})
 
@@ -31,4 +32,16 @@ class ApiKeyMiddleware:
             except AuthenticationFailed as exc:
                 return JsonResponse({"error": "unauthorized", "message": str(exc)}, status=401)
 
-        return self.get_response(request)
+        if request.credentials is None:
+            # No key presented. DRF answers 403 at the permission class; there is
+            # no tenant to scope to, and under RLS every query returns nothing
+            # anyway, which is the safe direction.
+            return self.get_response(request)
+
+        # Sets `complylayer.tenant_id` for the life of this request, which is
+        # what makes the row level security policies do anything. Nothing called
+        # `tenant_scope` outside the tests before this, so on a non-superuser
+        # connection every management query matched no rows — the third
+        # isolation layer could not be switched on.
+        with tenant_scope(request.credentials.tenant_id):
+            return self.get_response(request)

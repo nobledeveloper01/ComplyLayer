@@ -83,12 +83,19 @@ latency budget, and reproducible decisions.
   connecting role was a superuser, and Postgres exempts those unconditionally. Then, under the
   non-superuser role that fixes it, authentication stopped working entirely: the API key table was
   scoped by the tenant that reading it exists to *determine*, so the lookup returned nothing and
-  every request answered 401. A deployment could have row level security or it could have
-  authentication. [Migration 0008](complylayer/migrations/0008_api_key_resolution.py) gives key
-  resolution its own narrow policy — one row, by unique prefix, inside a function that sets a flag
-  for the length of one call — so ordinary queries stay scoped and the bootstrap works.
-  [The test](tests/test_api_key_auth.py) runs as `complylayer_app` and checks both halves: the key
-  resolves, and a plain `SELECT` on that table still sees nothing.
+  every request answered 401. [Migration 0008](complylayer/migrations/0008_api_key_resolution.py)
+  gives key resolution its own narrow policy — one row, by unique prefix, inside a function that
+  sets a flag for the length of one call. And that was still only half of it: `tenant_scope()`, the
+  function that sets the variable every policy reads, had no caller in production code at all, so
+  the setting was NULL on every request and the application authenticated and then saw an empty
+  database. The scope is now set by both middlewares, by the `signed_in` decorator, and by the
+  rule-set read itself — that last one because the version watcher polls it from a thread with no
+  request, and a poller that quietly returned nothing would stop picking up new rules.
+  `complylayer_dashboarduser`, which holds every user's TOTP secret, had no policy at all; a
+  [test that compares the models against the migration's list](tests/test_rls_every_table.py) found
+  it, and now fails whenever a new tenant-scoped model appears. **Proof rather than assertion,
+  because this claim has been wrong twice:** a full `POST /v1/decisions` is served with the
+  connection dropped to `complylayer_app`, and returns `block` naming the rule.
 - **An API key that is the whole key.** The prefix is stored in the clear so a dashboard can show
   which key is which; it identifies a key and does not authenticate one. The Argon2id verification
   is cached for a minute against a digest of the *entire* presented key, and the row itself is read

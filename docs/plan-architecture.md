@@ -408,6 +408,42 @@ helped, and this avoids an owner-privileged function existing at all.
 The general lesson, and it is the third time this project has met it: a control
 verified only in the configuration that disables it has not been verified.
 
+**And fixing authentication was only the first half.** With the key lookup
+working, the next query under `complylayer_app` still returned nothing, and so
+did the one after it. `tenant_scope()` — the function whose entire purpose is
+setting `complylayer.tenant_id`, written in phase 5, documented, tested — had no
+caller anywhere in production code. Only the tests ever called it. So the
+setting was NULL on every real request, every policy matched nothing, and the
+application authenticated and then behaved as though the database were empty.
+
+Row level security was not inert in the sense of being bypassed. It could not be
+switched on at all: a deployment could have working queries or working policies.
+
+The scope is now set in three places, and the split is deliberate:
+
+| Where | Covers | Why not just the middleware |
+|---|---|---|
+| `DecisionMiddleware` | the decision request | — |
+| `ApiKeyMiddleware` | every management request | — |
+| `signed_in` | every authenticated dashboard view | sessions, not keys |
+| `_load_published` | the rule-set read | `VersionWatcher` polls it from a thread with no request, and a poller that silently returned nothing would stop picking up new versions — §11.6's skew, arriving quietly |
+
+`complylayer_dashboarduser` was also missing a policy entirely. It carries a
+tenant and every user's `totp_secret`, and it was added in phase 6 after 0005's
+list was written. Migration 0009 fixes it with the same resolver shape as 0008,
+because sign-in has the same bootstrap problem as key resolution.
+
+The durable part of that fix is not the migration. It is
+`tests/test_rls_every_table.py::TestNothingScopedEscapedTheList`, which compares
+the models carrying a tenant against the migration's list and fails until
+somebody decides about the difference — because nobody removes a table from that
+list, and the mistake that actually happens is adding a model and not thinking
+about it.
+
+Proof, since this document has been wrong about layer three twice: a full
+`POST /v1/decisions` is served with the connection dropped to `complylayer_app`,
+returns `block`, and names the rule.
+
 ---
 
 ## Latency budget, restated with the omissions filled in
