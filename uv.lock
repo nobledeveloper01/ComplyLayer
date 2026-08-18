@@ -287,7 +287,7 @@ requires-dist = [
     { name = "djangorestframework", specifier = ">=3.15" },
     { name = "gunicorn", specifier = ">=23.0" },
     { name = "orjson", specifier = ">=3.10" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.4" },
     { name = "pyotp", specifier = ">=2.9" },
     { name = "redis", specifier = ">=5.2" },
     { name = "uvicorn", specifier = ">=0.34" },
