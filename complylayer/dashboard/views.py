@@ -80,9 +80,22 @@ def verify(request):
 
 
 def enrol(request):
+    """First-time authenticator setup, and only first-time.
+
+    The guard below is the whole of the fix for a complete MFA bypass: without
+    it, a session holding only a password reached this page, was handed a fresh
+    secret, and confirmed it from its own authenticator. `verify` redirects here
+    when a factor is missing, which made it easy to read this view as only ever
+    reachable in that state. It is a URL; anyone signed in can request it.
+
+    Guarded twice on purpose — here and in `begin_enrolment` — because this one
+    is a routing decision and that one is the rule.
+    """
     profile = current_profile(request)
     if profile is None:
         return redirect("dashboard:sign-in")
+    if profile.has_second_factor:
+        return redirect("dashboard:verify")
 
     if request.method == "POST":
         if confirm_enrolment(profile, request.POST.get("code", "")):

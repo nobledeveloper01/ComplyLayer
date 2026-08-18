@@ -47,7 +47,11 @@ def json_response(payload: dict[str, Any], status: int = 200) -> HttpResponse:
     )
 
 
-@csrf_exempt
+# Correct here and only here. This endpoint authenticates with a Bearer key
+# and reads no cookie, so a browser cannot be tricked into making an
+# authenticated request on somebody's behalf — there is no ambient authority
+# to ride. The dashboard's forms are session-authenticated and keep CSRF.
+@csrf_exempt  # nosemgrep: python.django.security.audit.csrf-exempt.no-csrf-exempt
 def decisions(request: HttpRequest) -> HttpResponse:
     started = time.perf_counter()
 

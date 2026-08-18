@@ -101,7 +101,7 @@ def rows_in_default_partition() -> int:
     with connection.cursor() as cursor:
         # nosec B608 - the identifier is a module constant checked by
         # _identifier(); Postgres has no placeholder for a table name.
-        cursor.execute(f'SELECT count(*) FROM ONLY "{_identifier(DEFAULT_PARTITION)}"')  # nosec  # noqa: S608
+        cursor.execute(f'SELECT count(*) FROM ONLY "{_identifier(DEFAULT_PARTITION)}"')  # nosec  # noqa: S608  # nosemgrep
         return cursor.fetchone()[0]
 
 

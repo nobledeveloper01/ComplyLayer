@@ -39,6 +39,14 @@ class SignInFailed(Exception):
     """
 
 
+class AlreadyEnrolled(Exception):
+    """Enrolment was attempted for an account that already has a second factor.
+
+    Raised rather than handled quietly, because the request that triggers it is
+    either a bug or somebody holding a stolen password. See `begin_enrolment`.
+    """
+
+
 def start_session(request, email: str, password: str):
     """Step one. Returns the profile; does not grant access on its own."""
     from complylayer.models import DashboardUser
@@ -82,11 +90,33 @@ def begin_enrolment(profile) -> tuple[str, str]:
     The secret is stored but not confirmed. Until a code verifies against it the
     account has no second factor, so a half-finished enrolment cannot be mistaken
     for a complete one.
+
+    **Refuses an account that already has a confirmed factor.** This used to
+    issue a fresh secret to anybody who asked, and the enrolment page asked on
+    every render — so a session holding only a stolen password could walk to
+    `/dashboard/enrol`, be handed a new secret, confirm it from its own
+    authenticator and be signed in as a compliance officer. It also destroyed
+    the real owner's factor on the way past. Proven end to end before it was
+    changed; `tests/test_dashboard.py` keeps the exploit as a test.
+
+    Re-enrolling a lost device is a recovery flow that has to re-establish who
+    is asking. It is not something one factor may do to itself.
+
+    An unconfirmed secret already on the profile is reused rather than replaced,
+    so reloading the page does not invalidate the entry somebody is part-way
+    through typing into their authenticator.
     """
-    secret = pyotp.random_base32()
-    profile.totp_secret = secret
-    profile.totp_confirmed_at = None
-    profile.save(update_fields=["totp_secret", "totp_confirmed_at"])
+    if profile.has_second_factor:
+        raise AlreadyEnrolled(
+            "this account already has an authenticator; "
+            "replacing it is a recovery flow, not an enrolment"
+        )
+
+    secret = profile.totp_secret or pyotp.random_base32()
+    if profile.totp_secret != secret or profile.totp_confirmed_at is not None:
+        profile.totp_secret = secret
+        profile.totp_confirmed_at = None
+        profile.save(update_fields=["totp_secret", "totp_confirmed_at"])
 
     uri = pyotp.TOTP(secret).provisioning_uri(name=profile.user.email, issuer_name=ISSUER)
     return secret, uri

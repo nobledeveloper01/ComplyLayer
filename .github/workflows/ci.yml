@@ -153,7 +153,27 @@ jobs:
       - run: uv sync --frozen
 
       - run: uv run bandit -q -c pyproject.toml -r complylayer/
-      - run: uv run semgrep --config auto --error --quiet complylayer/
+
+      # Pinned rulesets, not `--config auto`. Auto resolves against semgrep.dev
+      # at run time, so the gate changed underneath a green commit: the same
+      # tree that passed produced five findings a fortnight later, and a run
+      # that cannot reach the network passes by finding nothing. A security gate
+      # whose result depends on the day is not a gate. These packs are explicit
+      # and diffable; bumping them is a pull request.
+      #
+      # django-no-csrf-token is excluded because it is wrong here. It flags
+      # sign_in.html and verify.html and not the four templates written
+      # identically beside them, all six carry `{% csrf_token %}`, and neither a
+      # template comment nor an HTML comment suppresses it. That the control is
+      # real is asserted instead by
+      # tests/test_dashboard.py::TestCsrfIsEnforcedOnTheSignInForms, which
+      # renders the forms and posts without a token.
+      - name: semgrep
+        run: |
+          uv run semgrep --error --quiet complylayer/ \
+            --config p/python --config p/django --config p/secrets \
+            --exclude-rule python.django.security.django-no-csrf-token.django-no-csrf-token
+
       - run: uv run pip-audit --skip-editable
 
       - name: gitleaks

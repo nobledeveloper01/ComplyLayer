@@ -111,6 +111,9 @@ ignore = [
 # entire output.
 "tests/test_decision_benchmark.py" = ["S603", "T201"]
 "tests/test_latency_benchmark.py" = ["S603", "T201"]
+# Same: the benchmark class in here prints the auth cost, which is the number
+# the always-read-the-row tradeoff rests on.
+"tests/test_api_key_auth.py" = ["T201"]
 # A fuzzer wants a seeded, reproducible pseudo-random generator. A failure that
 # cannot be replayed is a failure nobody fixes, so `random.Random(seed)` is the
 # correct choice here rather than a weakness.

@@ -14,6 +14,8 @@
 
   {% if error %}<div class="rule-error"><div class="rule-error__problem">{{ error }}</div></div>{% endif %}
 
+  <!-- The token is on the next line; the rule misses it through the style
+       attribute. Verified against the rendered form. nosemgrep -->
   <form method="post" style="margin-top: var(--space-xl);">
     {% csrf_token %}
     <div class="field">

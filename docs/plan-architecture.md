@@ -355,13 +355,69 @@ compiled rule set and its own pub/sub subscription.
 
 ---
 
+## D14 — What the key cache is keyed on, and the one table tenancy cannot scope
+
+Two findings from the security review of phases 2–8, together because they are the
+same lookup and the fix for one constrains the other.
+
+**The cache was keyed on the prefix, which is public.** D-level guidance said keys
+were "cached 60 s against the key prefix". That is what got built: a hit returned
+the credentials without comparing the secret to anything. But the prefix is stored
+in the clear on purpose — a dashboard shows it so an operator can tell two keys
+apart — so for the life of every cache entry the credential was a 16-character
+public string standing in for a 192-bit secret. A forged key sharing only the
+prefix authenticated as the tenant, with its role, on the decision path and the
+management API alike.
+
+The cache is now keyed on SHA-256 of the entire presented key. A hit is only
+possible for a caller who supplied the identical secret. Fast hashing is right
+here: this is a lookup key in process memory, not storage, and the database still
+holds Argon2id.
+
+**Revocation was a sentence in a docstring.** "Revocation propagated over the same
+pub/sub channel the rule cache uses" — no publisher was ever written, the evict
+function had no caller outside the tests, and nothing re-read `revoked_at`. A
+revoked key kept working for up to a minute, and for different lengths of time in
+different workers, which is the worst version: an incident responder cannot tell
+which workers still honour it.
+
+The row is now read on every request, and only the Argon2id verification is
+cached. That was always the expensive part — measured at 26.7 ms cached versus
+0.18 ms p50 warm, against a 3 ms auth budget — so the query was never what the
+cache was for. Revocation takes effect on the key's next call, everywhere, with no
+new machinery. `tests/test_api_key_auth.py` keeps the measurement as a benchmark
+so the trade stays visible if it ever stops holding.
+
+**And the key table cannot be scoped by tenant, because it is what determines the
+tenant.** Migration 0005 put `complylayer_apikey` behind the same policy as
+everything else. Under a superuser — which every test run, every docker-compose
+and every development machine used — policies are skipped, so it looked fine.
+Under `complylayer_app`, the non-superuser role D4 asks for and the doctor
+recommends, `current_setting('complylayer.tenant_id')` is NULL at lookup time
+because no tenant is known yet, the policy matches nothing, and **every request
+answers 401**. A deployment could have row level security or authentication, never
+both, and only the configuration where layer three does nothing had ever run.
+
+Migration 0008 adds a second policy that applies only while
+`complylayer.resolving_key` is set, and a function that sets it for the duration
+of one call, selecting one row by unique prefix. Policies are OR'd, so every
+ordinary query stays tenant-scoped. Deliberately not `SECURITY DEFINER`: `FORCE
+ROW LEVEL SECURITY` binds the table owner too, so definer rights would not have
+helped, and this avoids an owner-privileged function existing at all.
+
+The general lesson, and it is the third time this project has met it: a control
+verified only in the configuration that disables it has not been verified.
+
+---
+
 ## Latency budget, restated with the omissions filled in
 
 ```
 Total budget: 100 ms p99, measured at the API edge
 
   Request read + validation (no DRF)          2 ms
-  API key verification (Argon2id, cached)      1 ms   ← verified once, cached 60 s by key prefix
+  API key lookup + verification (cached)       1 ms   ← row read every request; Argon2id cached 60 s
+                                                       against a digest of the whole key (D14)
   Rule set lookup                              0 ms   ← in-process, versioned, pre-compiled
   ONE Redis pipeline:
       idempotency probe
@@ -383,9 +439,10 @@ Total budget: 100 ms p99, measured at the API edge
 
 Argon2id deserves a note: verifying it is *designed* to be slow — tens of milliseconds at sane
 parameters, which is the whole point for password storage and completely wrong on a per-request hot
-path. Keys are verified once and the result cached in-process for 60 seconds against the key prefix,
-with revocation propagated over the same pub/sub channel the rule cache uses. Without that cache the
-key check alone would consume half the budget.
+path. Keys are verified once and the result cached in-process for 60 seconds. Without that cache the
+key check alone would consume half the budget. **What is cached, and what it is keyed on, is
+D14** — this paragraph used to say "against the key prefix, with revocation propagated over the same
+pub/sub channel", and both halves of that were wrong in ways that took a security review to find.
 
 ---
 

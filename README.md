@@ -76,9 +76,24 @@ latency budget, and reproducible decisions.
   product rather than an oversight in a permission table.
 - **An audit trail that is evidence, not a log.** Hash-chained per tenant, append-only by database
   trigger — an UPDATE fails for a superuser too — and corrections are appended rather than applied.
-- **Tenant isolation, three independent layers.** A key resolves to one tenant, the query layer
-  scopes every read, and row level security returns nothing if either is ever bypassed. Cross-tenant
-  reads return **404, never 403**: a 403 would confirm the object exists.
+- **Tenant isolation, three independent layers — and the third one now runs.** A key resolves to one
+  tenant, the query layer scopes every read, and row level security returns nothing if either is
+  ever bypassed. Cross-tenant reads return **404, never 403**: a 403 would confirm the object
+  exists. Layer three took two goes to make real. The policies were inert first because the
+  connecting role was a superuser, and Postgres exempts those unconditionally. Then, under the
+  non-superuser role that fixes it, authentication stopped working entirely: the API key table was
+  scoped by the tenant that reading it exists to *determine*, so the lookup returned nothing and
+  every request answered 401. A deployment could have row level security or it could have
+  authentication. [Migration 0008](complylayer/migrations/0008_api_key_resolution.py) gives key
+  resolution its own narrow policy — one row, by unique prefix, inside a function that sets a flag
+  for the length of one call — so ordinary queries stay scoped and the bootstrap works.
+  [The test](tests/test_api_key_auth.py) runs as `complylayer_app` and checks both halves: the key
+  resolves, and a plain `SELECT` on that table still sees nothing.
+- **An API key that is the whole key.** The prefix is stored in the clear so a dashboard can show
+  which key is which; it identifies a key and does not authenticate one. The Argon2id verification
+  is cached for a minute against a digest of the *entire* presented key, and the row itself is read
+  every request, so revoking a key stops it on its next call rather than whenever a cache happens to
+  expire. Both properties are held down by the exploits that used to work against them.
 - **A versioned rule cache with no database on the decision path.** Each worker compiles the rule
   set into memory and swaps it atomically. Propagation does not depend on pub/sub staying connected:
   there is a poll as well, and [the test that matters](tests/test_ruleset_cache.py) severs the

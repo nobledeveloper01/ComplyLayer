@@ -51,8 +51,15 @@ readme-check: ## Fail if the README has fallen behind PHASE
 doctor: ## Preflight this deployment's silent failure modes
 	$(PY) python manage.py complylayer_doctor
 
+# Semgrep runs here as well as in CI, and the rulesets match ci.yml exactly.
+# It used to run only in GitHub, so five findings sat on a green local `make ci`
+# and nobody saw them until somebody read the workflow log. A gate that only
+# runs somewhere else is a gate that surprises you.
 security: ## SAST and dependency audit
 	$(PY) bandit -q -c pyproject.toml -r complylayer/
+	$(PY) semgrep --error --quiet complylayer/ \
+		--config p/python --config p/django --config p/secrets \
+		--exclude-rule python.django.security.django-no-csrf-token.django-no-csrf-token
 	$(PY) pip-audit --skip-editable
 	gitleaks detect --no-banner --redact
 

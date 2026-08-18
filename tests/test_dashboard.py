@@ -403,6 +403,95 @@ class TestTheDashboardRenders:
         assert response.status_code == 302
         assert response.url == "/dashboard/verify"
 
+    def test_a_password_alone_cannot_re_enrol_its_way_past_the_second_factor(self, client, officer):
+        """The security review's first finding, kept as its exploit.
+
+        `enrol` had no guard and generated a secret on render, so a session
+        holding only a stolen password could collect a fresh authenticator,
+        confirm it, and reach the dashboard as a compliance officer — while
+        destroying the real owner's factor on the way. It ran end to end.
+        """
+        profile, victim_secret = officer
+        client.post(
+            "/dashboard/sign-in", {"email": profile.user.email, "password": "correct-horse"}
+        )
+
+        response = client.get("/dashboard/enrol")
+        assert response.status_code == 302, "enrolment is not reachable once a factor exists"
+        assert response.url == "/dashboard/verify"
+
+        profile.refresh_from_db()
+        assert profile.totp_secret == victim_secret, "the owner's factor is untouched"
+        assert profile.has_second_factor
+
+    def test_posting_to_enrolment_cannot_replace_a_confirmed_factor_either(self, client, officer):
+        """The GET is the convenient route. The POST must be shut too."""
+        import pyotp
+
+        profile, victim_secret = officer
+        client.post(
+            "/dashboard/sign-in", {"email": profile.user.email, "password": "correct-horse"}
+        )
+
+        attacker_secret = pyotp.random_base32()
+        response = client.post("/dashboard/enrol", {"code": pyotp.TOTP(attacker_secret).now()})
+        assert response.status_code == 302
+        assert response.url == "/dashboard/verify"
+
+        profile.refresh_from_db()
+        assert profile.totp_secret == victim_secret
+
+    def test_begin_enrolment_refuses_an_enrolled_account_on_its_own(self, officer):
+        """Guarded in the view and in the rule, so a future caller cannot reopen
+        it by routing around the view."""
+        from complylayer.dashboard.auth import AlreadyEnrolled, begin_enrolment
+
+        profile, _ = officer
+        with pytest.raises(AlreadyEnrolled):
+            begin_enrolment(profile)
+
+    def test_a_first_enrolment_still_works(self, client):
+        """The guard must not have shut the door on the people who need it."""
+        import pyotp
+        from django.contrib.auth.models import User
+
+        from complylayer.models import DashboardUser, Tenant
+
+        tenant = Tenant.objects.create(id="tnt_new", name="New")
+        user = User.objects.create_user(
+            username="new@example.com", email="new@example.com", password="correct-horse"
+        )
+        DashboardUser.objects.create(user=user, tenant=tenant, role="compliance_officer")
+
+        client.post("/dashboard/sign-in", {"email": "new@example.com", "password": "correct-horse"})
+        response = client.get("/dashboard/enrol")
+        assert response.status_code == 200
+
+        secret = response.context["secret"]
+        response = client.post("/dashboard/enrol", {"code": pyotp.TOTP(secret).now()})
+        assert response.status_code == 302
+        assert response.url == "/dashboard/"
+
+    def test_reloading_enrolment_keeps_the_secret_being_typed_in(self, client):
+        """A fresh secret on every render invalidates the one somebody is
+        half-way through entering into their phone."""
+        from django.contrib.auth.models import User
+
+        from complylayer.models import DashboardUser, Tenant
+
+        tenant = Tenant.objects.create(id="tnt_new2", name="New")
+        user = User.objects.create_user(
+            username="new2@example.com", email="new2@example.com", password="correct-horse"
+        )
+        DashboardUser.objects.create(user=user, tenant=tenant, role="compliance_officer")
+
+        client.post(
+            "/dashboard/sign-in", {"email": "new2@example.com", "password": "correct-horse"}
+        )
+        first = client.get("/dashboard/enrol").context["secret"]
+        second = client.get("/dashboard/enrol").context["secret"]
+        assert first == second
+
     def test_a_wrong_password_says_nothing_useful(self, client, officer):
         profile, _ = officer
         response = client.post(
@@ -557,3 +646,77 @@ class TestTheDashboardRenders:
         content = client.get("/dashboard/queue").content.decode()
         assert "Nothing waiting for review" in content
         assert "state--reassuring" in content
+
+
+@pytest.mark.django_db
+class TestCsrfIsEnforcedOnTheSignInForms:
+    """Evidence against a static-analysis finding, and a control worth a test anyway.
+
+    `semgrep`'s django-no-csrf-token rule flags `sign_in.html` and `verify.html`
+    and does not flag the other four templates, which are written identically.
+    Both do carry `{% csrf_token %}`, and `nosemgrep` in a Django template
+    comment or an HTML comment does not suppress it. So the claim is settled the
+    way claims in this repository get settled: by running it.
+
+    Sign-in CSRF is a real class of bug — an attacker who can forge a login
+    request can sign a victim into the attacker's own account and watch what
+    they do next — so this is worth asserting whatever the linter thinks.
+    """
+
+    @pytest.fixture(autouse=True)
+    def management_settings(self, management):
+        return management
+
+    def test_the_sign_in_form_carries_a_token(self, client):
+        assert b"csrfmiddlewaretoken" in client.get("/dashboard/sign-in").content
+
+    def test_the_verify_form_carries_a_token(self, client):
+        """Reached only with the first factor already given, so the test has to
+        get there the same way a person does."""
+        from datetime import UTC, datetime
+
+        import pyotp
+        from django.contrib.auth.models import User
+
+        from complylayer.models import DashboardUser, Tenant
+
+        tenant = Tenant.objects.create(id="tnt_csrf", name="CSRF")
+        user = User.objects.create_user(
+            username="csrf@example.com", email="csrf@example.com", password="correct-horse"
+        )
+        DashboardUser.objects.create(
+            user=user,
+            tenant=tenant,
+            role="compliance_officer",
+            totp_secret=pyotp.random_base32(),
+            totp_confirmed_at=datetime.now(UTC),
+        )
+        client.post(
+            "/dashboard/sign-in", {"email": "csrf@example.com", "password": "correct-horse"}
+        )
+
+        response = client.get("/dashboard/verify")
+        assert response.status_code == 200
+        assert b"csrfmiddlewaretoken" in response.content
+
+    def test_a_post_without_a_token_is_refused(self, client):
+        """The middleware, not the template, is the control."""
+        from django.test import Client
+
+        strict = Client(enforce_csrf_checks=True)
+        response = strict.post("/dashboard/sign-in", {"email": "a@example.com", "password": "x"})
+        assert response.status_code == 403
+
+    def test_a_post_with_the_token_gets_past_csrf(self, client):
+        """The other half: the control must not be refusing everything."""
+        from django.test import Client
+
+        strict = Client(enforce_csrf_checks=True)
+        page = strict.get("/dashboard/sign-in")
+        token = page.cookies["csrftoken"].value
+        response = strict.post(
+            "/dashboard/sign-in",
+            {"email": "a@example.com", "password": "x", "csrfmiddlewaretoken": token},
+        )
+        # 401 is the credentials being wrong, which means CSRF let it through.
+        assert response.status_code == 401
