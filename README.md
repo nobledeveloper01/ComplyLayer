@@ -8,6 +8,43 @@ approved themselves — with no engineer, no pull request and no deploy.
 
 <!-- phase: 8 -->
 
+## See it work
+
+```bash
+make up && make demo
+```
+
+One command from nothing to a compliance decision. It creates a throwaway
+database, seeds a tenant with three rules — written by one person and approved
+by another, because nobody approves their own change — starts a worker, and
+sends real transactions through `POST /v1/decisions`:
+
+```
+  TXN-DEMO-1  small transfer  ₦500
+    → allow   (3 rules evaluated, 0 matched, 15 ms)
+
+  TXN-DEMO-2  above the tier limit  ₦50000
+    → block   (3 rules evaluated, 1 matched, 5 ms)
+      rul_92f1346e  "Above the tier 1 daily limit"   CBN AML/CFT §4.2.1
+      customer: "This transfer is above your daily limit. Upgrade your tier to continue."
+
+  TXN-DEMO-3  the sixth transfer this hour  ₦200
+    → flag    (3 rules evaluated, 1 matched, 5 ms)
+      rul_1d80660f  "More than five transfers in an hour"   CBN AML/CFT §6.1
+```
+
+Then it prints the decision log and the audit chain, and tears everything down.
+Nothing is left behind.
+
+That is the whole product in one screen: a rule a compliance officer wrote,
+enforced in milliseconds, citing the regulation it implements, in language a
+customer can read.
+
+**The demo found a production bug on its first run** — every velocity rule
+returned a 500, with all 958 tests passing, because `_gather` handed back the
+constructor's provider rather than the one it had just built from the factory.
+Tests injected a provider directly; production never does. See §6.
+
 ---
 
 ## 1. The problem
@@ -829,6 +866,25 @@ different answers. The only real risk is two audit records for one decision, and
 second writer loses the insert and reads the winner's row. No distributed lock is
 needed, and adding one would cost more than the problem does.
 
+### Every velocity rule returned a 500, with a green suite
+
+`DecisionHandler` takes either `velocity=` (one provider, which suits a test) or
+`velocity_factory=` (one per customer, which is what the middleware passes
+because Redis keys are scoped per customer). `_gather` resolved the factory,
+used it to record the transaction, and then returned **`self.velocity`** — the
+constructor argument, which production never sets.
+
+So `functions.build(None, now)` bound the velocity functions to nothing and
+every velocity rule died with `'NoneType' object has no attribute 'count'`. A
+500 on structuring and transaction-velocity rules, which are most of what this
+product is for.
+
+958 tests passed throughout, because every one of them injected a provider
+directly. It is the same seam as the unwired endpoint: the path the tests took
+was not the path production takes. `make demo` hit it on its first real run,
+and `tests/test_decision_wiring.py` now builds the handler the way the
+middleware does.
+
 ### The gate that was not a gate
 
 `semgrep --config auto` resolves rulesets from semgrep.dev at run time. The same
@@ -897,6 +953,7 @@ during business hours is not.
 ```bash
 make install           # venv with Python 3.12, all dependencies
 make up                # Postgres and Redis in Docker
+make demo              # one command from nothing to a compliance decision
 make test              # unit tests, no Postgres or Redis needed
 make test-integration  # everything, including the isolation and chaos gates
 make cov               # the 90% coverage gate
@@ -945,11 +1002,14 @@ complylayer/migrations/   schema, partitions, RLS policies, the app role
 complylayer/checks.py     the preflight checks, one per silent failure mode
 complylayer/partitions.py monthly partitions and the default-partition alarm
 complylayer/db_router.py  analytics reads go to the replica; writes never do
+scripts/demo.sh           `make demo` — throwaway database, seed, three real
+                          decisions, teardown
+scripts/demo_render.py    renders one decision for a human; no jq required
 server/settings.py        the decision workload
 server/settings_management.py  the management workload — different URLconf and
                           middleware, which is the whole of D7
 server/boot.py            the refusal to start on published secrets
-tests/                    958 tests; the escape corpus, isolation, chaos,
+tests/                    960 tests; the escape corpus, isolation, chaos,
                           determinism and RLS suites are blocking gates
 docs/ROADMAP.md           the nine phases and their exit gates
 docs/plan-architecture.md D1–D14: what the specification left open
@@ -1026,7 +1086,7 @@ latency budget and reproducible decisions — the three claims §13 rests on. Ph
 | Node SDK, required `fallback` | Done |
 | Release pipeline: PyPI, npm, ghcr, cosign, trivy | Done — every action SHA-pinned |
 | Preflight for the silent failure modes | Done — 8 checks, each with its remediation |
-| **958 tests, 95.7% coverage** | |
+| **960 tests, 94.5% coverage** | |
 
 Deliberately not built, deferred to v1.1: OIDC beside the TOTP sign-in, Python and
 Go SDKs, a Helm chart, and the hosted product. A signed external anchor for the

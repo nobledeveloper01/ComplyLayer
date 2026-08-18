@@ -48,6 +48,9 @@ guard: ## The eval/exec guard — see ADR-0001
 readme-check: ## Fail if the README has fallen behind PHASE
 	./scripts/check-readme-phase.sh
 
+demo: ## End to end in one command: a transaction in, a compliance decision out
+	@bash scripts/demo.sh
+
 doctor: ## Preflight this deployment's silent failure modes
 	$(PY) python manage.py complylayer_doctor
 

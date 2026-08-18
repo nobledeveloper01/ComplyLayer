@@ -159,7 +159,16 @@ class DecisionHandler:
             )
         except Exception as exc:
             return UnavailableVelocity(exc)
-        return self.velocity
+        # `self._provider`, not `self.velocity`. They are the same object only
+        # when a caller injected a provider directly, which is what every test
+        # does and what production never does: the middleware passes
+        # `velocity_factory`, so `self.velocity` is None and this returned None
+        # into `functions.build()`. Every velocity rule then died with
+        # `'NoneType' object has no attribute 'count'` — a 500 on the rules the
+        # product is mostly about, with a fully green suite.
+        #
+        # Found by `make demo` on its first run against a real server.
+        return self._provider
 
     def build_facts(
         self, transaction: Transaction, now: datetime, velocity: Any = None

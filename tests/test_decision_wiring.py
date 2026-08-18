@@ -16,10 +16,12 @@ anything assembles them.
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 
 import orjson
 import pytest
+import redis
 from django.test import Client
 
 from complylayer import partitions, rules
@@ -27,6 +29,8 @@ from complylayer.api import auth
 from complylayer.api import decision_middleware as wiring
 from complylayer.models import ApiKey, Decision, Tenant
 from complylayer.tenancy import Actor, Role
+
+REDIS_URL = os.environ.get("COMPLYLAYER_REDIS_URL", "redis://127.0.0.1:6379/2")
 
 pytestmark = [pytest.mark.integration, pytest.mark.django_db]
 
@@ -241,3 +245,123 @@ class TestTenantIsolationOnTheDecisionPath:
         body = orjson.loads(post(client_for(key), {**BODY, "amount_minor": 1_000_000}).content)
 
         assert body["outcome"] == "allow", "the other tenant's rule set decided this request"
+
+
+@pytest.mark.integration
+@pytest.mark.django_db
+class TestVelocityReachesTheRulesThroughTheProductionSeam:
+    """A velocity rule, evaluated the way production builds the handler.
+
+    `DecisionHandler` takes either `velocity=` (one provider, which suits a
+    test) or `velocity_factory=` (one per customer, which is what the middleware
+    passes because Redis keys are scoped per customer). Every test used the
+    first. Production only ever uses the second.
+
+    `_gather` returned `self.velocity` — the constructor argument — rather than
+    the provider it had just resolved from the factory. So in production it
+    returned None, `functions.build(None, now)` bound the velocity functions to
+    nothing, and every velocity rule raised `'NoneType' object has no attribute
+    'count'`: a 500 on structuring and transaction-velocity rules, which are
+    most of what this product is for.
+
+    958 tests passed throughout. `make demo` caught it on its first real run.
+    """
+
+    def test_a_velocity_rule_decides_rather_than_raising(self):
+        from complylayer.api.handler import DecisionHandler
+        from complylayer.api.store import InMemoryStore
+        from complylayer.api.validation import Transaction
+        from complylayer.dsl import validate_source
+        from complylayer.engine import CompiledRule, RuleSet, Severity
+        from complylayer.velocity import RedisVelocity
+
+        client = redis.Redis.from_url(REDIS_URL)
+        client.flushdb()
+
+        ruleset = RuleSet(
+            1,
+            (
+                CompiledRule(
+                    "rul_vel",
+                    "More than two an hour",
+                    validate_source("velocity_count(window='1h') > 2"),
+                    Severity.FLAG,
+                ),
+            ),
+        )
+
+        # Built exactly as DecisionMiddleware builds it: a factory, no provider.
+        handler = DecisionHandler(
+            tenant_id="tnt_seam",
+            ruleset=ruleset,
+            store=InMemoryStore(),
+            velocity_factory=lambda customer_hash: RedisVelocity(client, "tnt_seam", customer_hash),
+            salt="a-real-salt",
+        )
+
+        def send(ref: str):
+            return handler.decide(
+                Transaction(
+                    transaction_ref=ref,
+                    customer_ref="usr_seam",
+                    amount_minor=10_000,
+                    currency="NGN",
+                    transaction_type="transfer",
+                ),
+                ref,
+            )
+
+        for ref in ("T1", "T2"):
+            body = send(ref)
+            assert body["outcome"] == "allow", body
+            assert not body["_errored_rules"], body["_errored_rules"]
+
+        third = send("T3")
+        assert third["outcome"] == "flag", third
+        assert [r["id"] for r in third["matched_rules"]] == ["rul_vel"]
+        assert not third["degraded"]
+
+    def test_the_provider_is_the_one_the_factory_returned(self):
+        """A guard on the shape of the fix. `_gather` must hand back the
+        resolved provider, never the constructor argument."""
+        from complylayer.api.handler import DecisionHandler
+        from complylayer.api.store import InMemoryStore
+        from complylayer.api.validation import Transaction
+        from complylayer.engine import RuleSet
+        from complylayer.velocity import RedisVelocity
+
+        client = redis.Redis.from_url(REDIS_URL)
+        client.flushdb()
+
+        built = []
+
+        def factory(customer_hash):
+            provider = RedisVelocity(client, "tnt_seam2", customer_hash)
+            built.append(provider)
+            return provider
+
+        handler = DecisionHandler(
+            tenant_id="tnt_seam2",
+            ruleset=RuleSet(1, ()),
+            store=InMemoryStore(),
+            velocity_factory=factory,
+            salt="a-real-salt",
+        )
+        transaction = Transaction(
+            transaction_ref="T1",
+            customer_ref="usr_seam",
+            amount_minor=10_000,
+            currency="NGN",
+            transaction_type="transfer",
+        )
+
+        assert handler.velocity is None, "production passes no provider directly"
+
+        # Through `decide`, because the factory is resolved in `_evaluate`.
+        # Calling `_gather` on its own reaches past the seam being tested.
+        handler.decide(transaction, "T1")
+
+        assert built, "the factory was never called"
+        assert handler._provider is built[0], (
+            "the handler evaluated against something other than the factory's provider"
+        )
