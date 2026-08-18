@@ -27,6 +27,10 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY complylayer/ ./complylayer/
 COPY server/ ./server/
 COPY manage.py ./
+# The wheel's long description. `pyproject.toml` points `readme` at this file,
+# so the build needs it — copied here rather than beside pyproject.toml so that
+# editing the README does not invalidate the dependency layer above.
+COPY README.md ./
 RUN uv sync --frozen --no-dev
 
 

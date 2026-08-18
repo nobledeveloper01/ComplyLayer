@@ -10,6 +10,11 @@ deploy
 scripts
 sdk
 *.md
+# …except the one the package metadata points at. `pyproject.toml` declares
+# `readme = "README.md"`, so hatchling reads it while building the wheel — and
+# with it excluded the build failed with "Readme file does not exist", inside
+# the image, where nobody was looking.
+!README.md
 .env
 .env.*
 compose.yaml
