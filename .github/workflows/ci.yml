@@ -221,11 +221,19 @@ jobs:
 
       # And a build that succeeds still proves nothing about whether the thing
       # starts. This runs the real entrypoint and waits for the port.
+      #
+      # Both secrets are set because `server/boot.py` refuses to start on the
+      # published defaults, and this step is where that refusal was first seen
+      # working: it had `COMPLYLAYER_SECRET_KEY` and not the salt, and the
+      # container correctly declined to serve. Keeping real-looking values here
+      # rather than relaxing the refusal — a smoke test that needs the guard
+      # turned off is not testing the thing that ships.
       - name: the entrypoint actually starts
         run: |
           docker run -d --name cl-smoke -p 8000:8000 \
             -e COMPLYLAYER_DB_HOST=127.0.0.1 \
-            -e COMPLYLAYER_SECRET_KEY=ci-only \
+            -e COMPLYLAYER_SECRET_KEY="${{ github.sha }}-ci-only-not-a-real-key" \
+            -e COMPLYLAYER_CUSTOMER_SALT="${{ github.sha }}-ci-only-salt" \
             complylayer:ci
           for i in $(seq 1 30); do
             if curl -fs localhost:8000/healthz >/dev/null 2>&1; then
