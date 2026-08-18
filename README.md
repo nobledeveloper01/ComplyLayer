@@ -36,6 +36,11 @@ latency budget, and reproducible decisions.
 
 ## What works today
 
+- **Metrics that can actually see what they were built to see.** `complylayer_ruleset_version` is
+  published to Redis per worker rather than held in process, because a Prometheus scrape reaches
+  exactly one worker — so the gauge built to detect *disagreement between workers* could not see
+  across them, and would have flickered between values and read as flapping. Verified under three
+  gunicorn workers: every scrape sees every worker.
 - **Wiring proved by use.** The decision endpoint is exercised end to end through the real
   middleware stack with nothing attached by hand ([the test](tests/test_decision_wiring.py)), because
   832 green tests once sat on top of an endpoint that raised `AttributeError` on its first real

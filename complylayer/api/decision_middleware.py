@@ -124,6 +124,7 @@ class DecisionMiddleware:
     def __call__(self, request):
         request.decision_handler = None
         request.ruleset_cache = None
+        request.metrics_client = self.redis
 
         if request.path in EXEMPT_PATHS:
             # `readyz` still needs the cache, because readiness *is* the cache
@@ -158,7 +159,11 @@ class DecisionMiddleware:
                 status=409,
             )
 
-        metrics.set_gauge(
+        # Published to Redis, not just to this worker's registry: a scrape hits
+        # one worker, and a gauge whose whole purpose is showing disagreement
+        # between workers has to be visible from any of them.
+        metrics.publish_gauge(
+            self.redis,
             "complylayer_ruleset_version",
             loaded.ruleset.version,
             {"tenant": credentials.tenant_id},

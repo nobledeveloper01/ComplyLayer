@@ -16,6 +16,8 @@ dependencies = [
     "argon2-cffi>=23.1",
     "djangorestframework>=3.15",
     "pyotp>=2.9",
+    "gunicorn>=23.0",
+    "uvicorn>=0.34",
 ]
 
 [project.urls]
@@ -75,6 +77,11 @@ select = [
 ]
 ignore = [
     "S101",      # assert is how the tests are written
+    # Telemetry must never break a decision, and on a path running 2,000 times a
+    # second a logged exception per failure buries the records that matter. The
+    # two sites that swallow are in complylayer/engine/metrics.py and each says
+    # why in a comment.
+    "S110",
 ]
 
 [tool.ruff.lint.per-file-ignores]

@@ -41,4 +41,11 @@ def readyz(request: HttpRequest) -> HttpResponse:
 
 
 def metrics_view(request: HttpRequest) -> HttpResponse:
-    return HttpResponse(metrics.render(), content_type="text/plain; version=0.0.4")
+    """Renders this worker's counters plus every worker's shared gauges.
+
+    A scrape reaches exactly one worker. Without the shared half, the metric
+    built to detect disagreement between workers could never see more than one
+    of them.
+    """
+    client = getattr(request, "metrics_client", None)
+    return HttpResponse(metrics.render(client), content_type="text/plain; version=0.0.4")

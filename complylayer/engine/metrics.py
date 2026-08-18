@@ -9,6 +9,22 @@ serving decisions from a rule set that was retired last week, and nothing else
 reports it. Latency is fine, no errors are raised, the dashboard looks healthy,
 and a fraction of traffic is being evaluated against the wrong controls. Labelled
 per pod, a pod whose four workers disagree looks like a single healthy value.
+
+**Which is why cross-worker gauges are published to Redis, not held in memory.**
+Found by running gunicorn with two workers and scraping `/metrics` six times: two
+scrapes returned the deciding worker's gauge and four returned nothing at all,
+because a scrape reaches exactly one worker and each worker has its own registry.
+The metric built to detect skew across workers could not see across workers. It
+would have flickered between values scrape to scrape and read as flapping.
+
+Counters and histograms stay in process — they aggregate correctly when Prometheus
+sums across scrapes, and their per-worker sampling is a statistical detail rather
+than a correctness one. Gauges whose *disagreement* is the signal go to Redis,
+keyed by worker, with a TTL so a dead worker stops reporting rather than
+lingering as permanent false skew.
+
+Redis rather than `prometheus_client`'s multiprocess mode because that needs a
+writable directory, and the container runs on a read-only root filesystem.
 """
 
 from __future__ import annotations
@@ -27,6 +43,54 @@ _histograms: dict[tuple[str, tuple[tuple[str, str], ...]], list[float]] = defaul
 STAGES = ("auth", "facts", "eval", "serialize")
 
 BUCKETS_MS = (1, 2, 5, 10, 20, 50, 100, 250, 500)
+
+
+# Long enough that a slow scrape interval does not lose a live worker, short
+# enough that a worker killed mid-deploy stops reporting quickly.
+SHARED_GAUGE_TTL_SECONDS = 120
+SHARED_GAUGE_KEY = "cl:metrics:gauge"
+
+
+def publish_gauge(client, name: str, value: float, labels: dict[str, str] | None = None) -> None:
+    """Publish a gauge every worker must be able to see.
+
+    Best effort: a metrics write must never be the reason a decision fails. If
+    Redis is unreachable the decision path is already degrading for reasons that
+    matter more, and that degradation is recorded on the decision itself.
+    """
+    try:
+        field = _render_key(_key(name, labels))
+        pipe = client.pipeline()
+        pipe.hset(SHARED_GAUGE_KEY, field, value)
+        pipe.expire(SHARED_GAUGE_KEY, SHARED_GAUGE_TTL_SECONDS)
+        pipe.execute()
+    except Exception:  # nosec B110 - see the comment below
+        # Deliberately silent rather than logged. This runs on the decision path
+        # for every request; a Redis outage would write one line per decision at
+        # 2,000 a second, burying the degraded-decision records that actually
+        # matter. The outage is already visible on the decisions themselves,
+        # which is where somebody will look.
+        pass
+
+
+def shared_gauges(client) -> dict[str, float]:
+    """Every worker's published gauges, for a scrape that must see all of them."""
+    try:
+        raw = client.hgetall(SHARED_GAUGE_KEY) or {}
+    except Exception:
+        # what this worker knows rather than failing. An empty metrics response
+        # would page somebody about monitoring instead of about the outage.
+        return {}
+
+    rendered: dict[str, float] = {}
+    for field, value in raw.items():
+        key = field.decode() if isinstance(field, bytes | bytearray) else str(field)
+        text = value.decode() if isinstance(value, bytes | bytearray) else str(value)
+        try:
+            rendered[key] = float(text)
+        except ValueError:
+            continue
+    return rendered
 
 
 def _key(name: str, labels: dict[str, str] | None) -> tuple[str, tuple[tuple[str, str], ...]]:
@@ -68,9 +132,17 @@ def snapshot() -> dict[str, dict[str, float]]:
         }
 
 
-def render() -> str:
-    """Prometheus text exposition."""
+def render(client=None) -> str:
+    """Prometheus text exposition.
+
+    `client` is the Redis connection. Without it this renders only what this
+    worker has seen, which is correct for a single-process deployment and
+    misleading for any other — see the module docstring.
+    """
     lines: list[str] = []
+    if client is not None:
+        for field, value in sorted(shared_gauges(client).items()):
+            lines.append(f"{field} {value:g}")
     with _lock:
         for key, value in sorted(_counters.items()):
             lines.append(f"{_render_key(key)} {value:g}")

@@ -168,8 +168,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Phase 8 adds the image build, trivy scan and cosign signature. Until
-      # there is something to serve there is nothing to containerise, and a
-      # placeholder Dockerfile would only rot.
-      - name: placeholder
-        run: echo "::notice::image build, trivy and cosign land in phase 8"
+      - uses: docker/setup-buildx-action@v3
+
+      # Built on every change, not only at a tag. The entrypoint shipped without
+      # gunicorn in its dependencies because nothing ever built the image — an
+      # image nobody builds is an image that does not build.
+      - name: build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: complylayer:ci
+
+      # And a build that succeeds still proves nothing about whether the thing
+      # starts. This runs the real entrypoint and waits for the port.
+      - name: the entrypoint actually starts
+        run: |
+          docker run -d --name cl-smoke -p 8000:8000 \
+            -e COMPLYLAYER_DB_HOST=127.0.0.1 \
+            -e COMPLYLAYER_SECRET_KEY=ci-only \
+            complylayer:ci
+          for i in $(seq 1 30); do
+            if curl -fs localhost:8000/healthz >/dev/null 2>&1; then
+              echo "the container serves /healthz"; docker rm -f cl-smoke; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the container never answered /healthz"
+          docker logs cl-smoke; docker rm -f cl-smoke; exit 1

@@ -382,3 +382,72 @@ class TestBenchmarkCommand:
         with _pytest.raises(SystemExit) as exc:
             call_command("complylayer_benchmark", rules=5, iterations=50, stdout=StringIO())
         assert exc.value.code == 1
+
+
+@pytest.mark.integration
+class TestGaugesAreVisibleFromEveryWorker:
+    """Found by running gunicorn with two workers and scraping six times.
+
+    Two scrapes returned the deciding worker's gauge; four returned nothing at
+    all. A scrape reaches exactly one worker, and each has its own registry — so
+    the metric built to detect disagreement *between* workers could not see
+    across them. It would have flickered between values and read as flapping.
+    """
+
+    @pytest.fixture
+    def client(self):
+        import os
+
+        import redis as redis_lib
+
+        connection = redis_lib.Redis.from_url(
+            os.environ.get("COMPLYLAYER_REDIS_URL", "redis://127.0.0.1:6379/2")
+        )
+        connection.delete(metrics.SHARED_GAUGE_KEY)
+        yield connection
+        connection.delete(metrics.SHARED_GAUGE_KEY)
+
+    def test_one_workers_gauge_is_readable_by_another(self, client):
+        metrics.publish_gauge(client, "complylayer_ruleset_version", 47, {"tenant": "tnt_a"})
+
+        rendered = metrics.render(client)
+        assert "complylayer_ruleset_version" in rendered
+        assert "47" in rendered
+
+    def test_disagreeing_workers_are_both_visible(self, client):
+        """The whole point. Four workers on version 47 and one on 46 is the
+        condition §11.4 pages on, and it has to be *observable* to be paged on."""
+        for worker, version in [("101", 47), ("102", 47), ("103", 46)]:
+            field = f'complylayer_ruleset_version{{tenant="tnt_a",worker="{worker}"}}'
+            client.hset(metrics.SHARED_GAUGE_KEY, field, version)
+
+        rendered = metrics.render(client)
+        assert 'worker="101"} 47' in rendered
+        assert 'worker="103"} 46' in rendered
+        assert len({line.split()[-1] for line in rendered.splitlines() if line.strip()}) > 1
+
+    def test_a_dead_worker_stops_reporting_rather_than_lingering(self, client):
+        """Otherwise a worker killed during a deploy leaves permanent false skew,
+        and the alert becomes one people mute."""
+        metrics.publish_gauge(client, "complylayer_ruleset_version", 47, {"tenant": "tnt_a"})
+        assert 0 < client.ttl(metrics.SHARED_GAUGE_KEY) <= metrics.SHARED_GAUGE_TTL_SECONDS
+
+    def test_a_scrape_without_redis_still_answers(self, client):
+        """An empty metrics response would page somebody about monitoring
+        instead of about the outage."""
+
+        class Broken:
+            def hgetall(self, key):
+                raise ConnectionError("gone")
+
+        metrics.reset()
+        metrics.increment("complylayer_decisions_total", {"outcome": "allow"})
+        rendered = metrics.render(Broken())
+        assert "complylayer_decisions_total" in rendered
+
+    def test_publishing_never_raises_on_the_decision_path(self):
+        class Broken:
+            def pipeline(self):
+                raise ConnectionError("gone")
+
+        metrics.publish_gauge(Broken(), "complylayer_ruleset_version", 1, {"tenant": "t"})
