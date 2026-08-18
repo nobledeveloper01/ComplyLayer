@@ -348,7 +348,10 @@ class TestDesignTokens:
 
 
 @pytest.mark.integration
-@pytest.mark.django_db
+# `replica` is declared because the approval page backtests the proposed rule
+# against recorded history, and §11.1 puts that read on the replica. In tests it
+# is a MIRROR of `default`, so this costs nothing but the declaration.
+@pytest.mark.django_db(databases=["default", "replica"])
 class TestTheDashboardRenders:
     """The pages, end to end, through Django's test client.
 
@@ -720,3 +723,82 @@ class TestCsrfIsEnforcedOnTheSignInForms:
         )
         # 401 is the credentials being wrong, which means CSRF let it through.
         assert response.status_code == 401
+
+
+class TestTheApprovalImpactIsRealOrAbsent:
+    """The number on the screen where a control gets loosened.
+
+    It used to be `BacktestImpact(total=48_190, before_matches=118,
+    after_matches=1_204)` — a literal in the view, identical for every rule and
+    every tenant. A reviewer weighing "10x higher" was being handed an invented
+    figure to weigh it against, on the one page where that matters most.
+
+    `complylayer/backtest/` exists precisely for this and reports EXACT, PARTIAL
+    or UNAVAILABLE with the caveat inside the sentence. The dashboard went
+    around it with a constant. Found by photographing the page for the README.
+    """
+
+    class FakeRule:
+        def __init__(self, expression):
+            self.expression = expression
+
+    class StoredDecision:
+        def __init__(self, amount):
+            self.id = f"dec_{amount}"
+            self.transaction_ref = f"TXN-{amount}"
+            self.amount_minor = amount
+            self.currency = "NGN"
+            self.decided_at = "2026-08-01T00:00:00Z"
+            self.resolved_facts = {"amount_minor": amount}
+            self.outcome = "allow"
+
+    def test_no_history_shows_no_figure_at_all(self):
+        """ "Matched 0 of 0" reads like a finding. It is an absence."""
+        from complylayer.dashboard.views import impact_of
+
+        assert impact_of(self.FakeRule("amount_minor > 1000000"), []) is None
+
+    def test_the_figure_comes_from_the_rows(self):
+        from complylayer.backtest import Confidence
+        from complylayer.dashboard.views import impact_of
+
+        decisions = [self.StoredDecision(5_000_000) for _ in range(4)]
+        decisions += [self.StoredDecision(1_000) for _ in range(6)]
+
+        impact = impact_of(self.FakeRule("amount_minor > 1000000"), decisions)
+        assert impact.confidence is Confidence.EXACT
+        assert impact.considered == 10
+        assert impact.matched == 4, "the figure must come from the rows, not a constant"
+
+    def test_a_rule_needing_an_unrecorded_fact_says_so_rather_than_guessing(self):
+        from complylayer.backtest import Confidence
+        from complylayer.dashboard.views import impact_of
+
+        impact = impact_of(
+            self.FakeRule("days_since(last_transaction_at) > 90"),
+            [self.StoredDecision(1_000)],
+        )
+        assert impact.confidence is Confidence.UNAVAILABLE
+        assert "shadow mode" in impact.sentence
+
+    def test_the_history_read_goes_to_the_replica(self):
+        """§11.1: the heaviest read in the product stays off the database
+        serving decisions."""
+        import inspect
+
+        from complylayer.dashboard import views
+
+        source = inspect.getsource(views._recent_decisions)
+        assert "using(REPLICA)" in source
+
+    def test_the_rendered_page_carries_no_invented_figures(self):
+        """A behavioural guard rather than a grep: the docstring above quotes
+        the old literal on purpose, so searching the source for it would find
+        the explanation and fail forever."""
+        from complylayer.dashboard.views import impact_of
+
+        impact = impact_of(self.FakeRule("amount_minor > 1000000"), [])
+        assert impact is None
+        rendered = impact.sentence if impact else ""
+        for invented in ("48,190", "1,204", "118"):
+            assert invented not in rendered

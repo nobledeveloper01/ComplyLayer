@@ -24,10 +24,14 @@ from complylayer.dashboard.auth import (
     verify_second_factor,
 )
 from complylayer.dashboard.builder import SHAPES, SHAPES_BY_KEY, WINDOWS, build
-from complylayer.dashboard.diff import BacktestImpact, compare
+from complylayer.dashboard.diff import compare
 from complylayer.dsl import RuleSyntaxError, validate_source
 from complylayer.models import Decision, Rule
 from complylayer.tenancy import Action, Actor, Role, may
+
+# How much history a backtest on the approval screen looks at. Bounded because
+# this runs while somebody waits for a page, and the replica is not free.
+BACKTEST_SAMPLE = 5_000
 
 
 def _actor(request) -> Actor:
@@ -310,7 +314,7 @@ def approval(request, rule_id: str):
             **_chrome(request),
             "rule": rule,
             "diff": diff,
-            "impact": BacktestImpact(total=48_190, before_matches=118, after_matches=1_204),
+            "impact": impact_of(rule, _recent_decisions(request.profile.tenant)),
             "is_author": own,
             "can_approve": may(actor.role, Action.APPROVE) and not own,
             "author_state": states.pending_approval_seen_by_author(rule.created_by)
@@ -318,6 +322,52 @@ def approval(request, rule_id: str):
             else None,
         },
     )
+
+
+def _recent_decisions(tenant):
+    """The history a backtest runs over.
+
+    Reads the replica: a backtest is the heaviest read in the product and §11.1
+    keeps it off the database serving decisions. Bounded, because this runs
+    while somebody waits for a page.
+    """
+    from complylayer.db_router import REPLICA
+
+    return list(
+        Decision.objects.using(REPLICA)
+        .filter(tenant=tenant)
+        .order_by("-decided_at")[:BACKTEST_SAMPLE]
+    )
+
+
+def impact_of(rule, decisions):
+    """What this rule would have done to recorded history, or nothing.
+
+    **This used to be a literal.** The view passed a hardcoded
+    `BacktestImpact(...)` — the same three numbers for every rule and every
+    tenant, on the one screen where somebody decides whether to loosen a
+    control. A reviewer weighing "10x higher" was handed an invented figure to
+    weigh it against.
+
+    That is worse than the case `complylayer/backtest/` was built for. That
+    module reports EXACT, PARTIAL or UNAVAILABLE and puts the caveat inside the
+    sentence, on the principle that an approximate number here is worse than an
+    honest blank. The dashboard went around it with a constant. Found by
+    photographing the page for the README.
+
+    Returns None when there is no history: the template then renders nothing,
+    because "matched 0 of 0" reads like a finding and it is an absence.
+    """
+    from complylayer import backtest as bt
+
+    if not decisions:
+        return None
+    try:
+        return bt.backtest(rule.expression, decisions)
+    except RuleSyntaxError:
+        # A rule that will not parse cannot be backtested, and the approval page
+        # is not where that gets reported — the editor already refused it.
+        return None
 
 
 @signed_in

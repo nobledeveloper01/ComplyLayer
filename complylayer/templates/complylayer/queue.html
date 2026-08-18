@@ -31,8 +31,10 @@
       <td>
         <span class="severity severity--{{ decision.outcome }}">{{ decision.outcome }}</span>
         {% if decision.degraded %}
-          {# A control that did not run is neither pass nor fail, and must never
-             be mistaken for either. #}
+          {% comment %}
+A control that did not run is neither pass nor fail, and must never
+             be mistaken for either.
+{% endcomment %}
           <span class="severity severity--degraded">degraded</span>
         {% endif %}
       </td>

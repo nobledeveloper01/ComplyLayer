@@ -21,8 +21,10 @@
   {% for rule in rules %}
     <tr>
       <td><a href="{% url 'dashboard:approval' rule.id %}">{{ rule.name }}</a></td>
-      {# The expression, as code, everywhere it appears. The officer, the
-         approver and the auditor all read the text that runs. #}
+      {% comment %}
+The expression, as code, everywhere it appears. The officer, the
+         approver and the auditor all read the text that runs.
+{% endcomment %}
       <td><code class="expression" style="border:none;background:none;padding:0">{{ rule.expression }}</code></td>
       <td>{{ rule.regulatory_reference|default:"—" }}</td>
       <td><span class="severity severity--{{ rule.severity }}">{{ rule.severity }}</span></td>

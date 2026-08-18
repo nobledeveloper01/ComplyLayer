@@ -5,8 +5,10 @@
 <div class="page-header"><h1>{{ rule.name }}</h1></div>
 
 {% if diff and diff.threshold %}
-  {# The change, in the unit a human thinks in, at display size. A reviewer
-     scanning a text diff sees a one-character change and approves it. #}
+  {% comment %}
+The change, in the unit a human thinks in, at display size. A reviewer
+     scanning a text diff sees a one-character change and approves it.
+{% endcomment %}
   <h2>What changed</h2>
   <div class="diff__change">
     <span class="diff__amount diff__amount--before">{{ diff.threshold.render_before }}</span>
@@ -39,20 +41,30 @@
   </p>
 {% endif %}
 
-{# A reviewer weighing "10x higher" is weighing an abstraction until they see it
-   means 1,204 transactions rather than 118. #}
-<div class="diff__impact">
-  <h3>If this had been live last month</h3>
-  <p>{{ impact.sentence }}</p>
-</div>
+{% comment %}
+A reviewer weighing "10x higher" is weighing an abstraction until they see what
+it meant over real transactions. The figure comes from complylayer/backtest/,
+which reports EXACT, PARTIAL or UNAVAILABLE and puts the caveat in the sentence.
+Absent entirely when there is no history: a made-up number on this screen is
+worse than a blank, and "matched 0 of 0" reads like a finding rather than an
+absence.
+{% endcomment %}
+{% if impact %}
+  <div class="diff__impact">
+    <h3>If this had been live</h3>
+    <p>{{ impact.sentence }}</p>
+  </div>
+{% endif %}
 
 <p style="color: var(--ink-muted);">
   Requested by <strong>{{ rule.created_by }}</strong>{% if diff.reason %}: {{ diff.reason }}{% endif %}
 </p>
 
 {% if author_state %}
-  {# Read-only for the author, and it says why before they discover it by losing
-     an approval they waited two days for. #}
+  {% comment %}
+Read-only for the author, and it says why before they discover it by losing
+     an approval they waited two days for.
+{% endcomment %}
   <div class="state state--pressure" style="text-align:left; margin-top: var(--space-xl);">
     <div class="state__title">{{ author_state.title }}</div>
     <p class="state__detail" style="margin-left:0">{{ author_state.detail }}</p>
@@ -61,8 +73,10 @@
 
 <div class="diff__actions">
   {% if can_approve %}
-    {# Approve sits alone, and stays disabled until the reviewer has scrolled
-       past the impact figure. #}
+    {% comment %}
+Approve sits alone, and stays disabled until the reviewer has scrolled
+       past the impact figure.
+{% endcomment %}
     <form method="post" action="{% url 'dashboard:approval' rule.id %}">
       {% csrf_token %}
       <button class="button" type="submit" name="action" value="approve"

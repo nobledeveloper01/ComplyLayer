@@ -51,6 +51,9 @@ readme-check: ## Fail if the README has fallen behind PHASE
 demo: ## End to end in one command: a transaction in, a compliance decision out
 	@bash scripts/demo.sh
 
+dashboard: ## Run the dashboard against a seeded throwaway database, and hold it open
+	@bash scripts/dashboard_demo.sh
+
 doctor: ## Preflight this deployment's silent failure modes
 	$(PY) python manage.py complylayer_doctor
 

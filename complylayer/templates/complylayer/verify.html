@@ -20,9 +20,11 @@
     {% csrf_token %}
     <div class="field">
       <label class="field__label" for="code">Code</label>
-      {# One-time-code autocomplete lets a phone offer it, and inputmode keeps a
+      {% comment %}
+One-time-code autocomplete lets a phone offer it, and inputmode keeps a
          numeric keypad on mobile. Small things, but this is a screen somebody
-         uses several times a day. #}
+         uses several times a day.
+{% endcomment %}
       <input class="field__input field__input--numeric" id="code" name="code"
              inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}"
              maxlength="6" autofocus required>

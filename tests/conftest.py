@@ -107,3 +107,21 @@ def view_only(settings):
     """
     settings.MIDDLEWARE = [m for m in settings.MIDDLEWARE if "decision_middleware" not in m]
     return settings
+
+
+@pytest.fixture(autouse=True)
+def _close_replica_connection():
+    """Close the replica alias after every test.
+
+    The approval page backtests against recorded history, and §11.1 puts that
+    read on the replica — a second connection to what is, under test, the same
+    database. pytest-django closes `default` on teardown and leaves that one
+    open, so dropping the test database fails with "is being accessed by other
+    users" and the whole session ends on a warning that has nothing to do with
+    the code under test.
+    """
+    yield
+    from django.db import connections
+
+    if "replica" in connections:
+        connections["replica"].close()

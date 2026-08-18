@@ -40,6 +40,24 @@ That is the whole product in one screen: a rule a compliance officer wrote,
 enforced in milliseconds, citing the regulation it implements, in language a
 customer can read.
 
+## Who writes the rules
+
+Not an engineer. The builder asks questions in the language of the regulation
+and writes the expression as the officer answers — the same text that runs, and
+the same text an auditor reads.
+
+![The rule builder, writing a structuring rule](docs/images/rule-builder.png)
+
+And an approval is not a text diff. A reviewer scanning red and green lines sees
+one character move and approves it, so the change is shown in the unit a person
+thinks in, with the direction, the magnitude, the regulation it claims, and what
+it would have done to recorded history.
+
+![The approval diff, showing a tenfold loosening](docs/images/approval-diff.png)
+
+Nobody approves their own change, whatever their role. Both screens come from
+`make dashboard`, which seeds this exact state on a throwaway database.
+
 **The demo found a production bug on its first run** — every velocity rule
 returned a 500, with all 958 tests passing, because `_gather` handed back the
 constructor's provider rather than the one it had just built from the factory.
@@ -885,6 +903,30 @@ was not the path production takes. `make demo` hit it on its first real run,
 and `tests/test_decision_wiring.py` now builds the handler the way the
 middleware does.
 
+### The approval screen showed an invented number
+
+The panel telling a reviewer what a rule change would have done was a literal:
+`BacktestImpact(total=48_190, before_matches=118, after_matches=1_204)`, in the
+view, identical for every rule and every tenant.
+
+`complylayer/backtest/` was built for exactly this and reports EXACT, PARTIAL or
+UNAVAILABLE with the caveat inside the sentence, on the stated principle that an
+approximate number here is worse than an honest blank. The dashboard went around
+it with a constant, on the one screen where somebody decides whether to loosen a
+control. It now backtests the proposed rule against recorded history, on the
+replica, and renders nothing at all when there is no history — because "matched
+0 of 0" reads like a finding and it is an absence.
+
+### The dashboard rendered its own source comments
+
+Every page carried lines like `{# The shell every dashboard page renders into.`
+as visible text, at the top of the screen and through the middle of the rules
+table. Django's `{# #}` is a single-line comment; a multi-line one is not
+stripped, and nine of them were.
+
+Both of these were found the same way: by opening the dashboard to photograph it
+for this README. Nobody had looked at it.
+
 ### The gate that was not a gate
 
 `semgrep --config auto` resolves rulesets from semgrep.dev at run time. The same
@@ -954,6 +996,7 @@ during business hours is not.
 make install           # venv with Python 3.12, all dependencies
 make up                # Postgres and Redis in Docker
 make demo              # one command from nothing to a compliance decision
+make dashboard         # the dashboard, seeded, held open for a look
 make test              # unit tests, no Postgres or Redis needed
 make test-integration  # everything, including the isolation and chaos gates
 make cov               # the 90% coverage gate
@@ -1005,11 +1048,14 @@ complylayer/db_router.py  analytics reads go to the replica; writes never do
 scripts/demo.sh           `make demo` — throwaway database, seed, three real
                           decisions, teardown
 scripts/demo_render.py    renders one decision for a human; no jq required
+scripts/dashboard_demo.sh `make dashboard` — the dashboard on a seeded
+                          throwaway database, for looking at
+docs/images/              the screenshots above, captured from that
 server/settings.py        the decision workload
 server/settings_management.py  the management workload — different URLconf and
                           middleware, which is the whole of D7
 server/boot.py            the refusal to start on published secrets
-tests/                    960 tests; the escape corpus, isolation, chaos,
+tests/                    965 tests; the escape corpus, isolation, chaos,
                           determinism and RLS suites are blocking gates
 docs/ROADMAP.md           the nine phases and their exit gates
 docs/plan-architecture.md D1–D14: what the specification left open
@@ -1086,7 +1132,7 @@ latency budget and reproducible decisions — the three claims §13 rests on. Ph
 | Node SDK, required `fallback` | Done |
 | Release pipeline: PyPI, npm, ghcr, cosign, trivy | Done — every action SHA-pinned |
 | Preflight for the silent failure modes | Done — 8 checks, each with its remediation |
-| **960 tests, 94.5% coverage** | |
+| **965 tests, 93.8% coverage** | |
 
 Deliberately not built, deferred to v1.1: OIDC beside the TOTP sign-in, Python and
 Go SDKs, a Helm chart, and the hosted product. A signed external anchor for the

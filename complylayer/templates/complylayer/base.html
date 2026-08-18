@@ -1,7 +1,9 @@
-{# The shell every dashboard page renders into.
+{% comment %}
+The shell every dashboard page renders into.
 
    Navigation is built from permissions, not hidden with CSS: a section an
-   engineer cannot use is a section an engineer does not see. #}
+   engineer cannot use is a section an engineer does not see.
+{% endcomment %}
 <!doctype html>
 <html lang="en" data-theme="{{ request.COOKIES.complylayer_theme|default:'' }}">
 <head>
@@ -14,8 +16,10 @@
 </head>
 <body>
 {% if degraded_banner %}
-  {# Sticky, on every screen showing decision data. A reviewer who scrolls past
-     it is reading incomplete data without knowing. #}
+  {% comment %}
+Sticky, on every screen showing decision data. A reviewer who scrolls past
+     it is reading incomplete data without knowing.
+{% endcomment %}
   <div class="degraded-banner" role="status">
     <strong>{{ degraded_banner.title }}</strong>
     <span>{{ degraded_banner.detail }}</span>

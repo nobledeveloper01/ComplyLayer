@@ -17,6 +17,8 @@ the clear — the database holds an Argon2id hash.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
@@ -28,6 +30,11 @@ from complylayer.tenancy import Actor, Role
 # be the same person, so a demo needs both.
 ANALYST = Actor(id="ada@demo.ng", role=Role.COMPLIANCE_ANALYST)
 OFFICER = Actor(id="chidi@demo.ng", role=Role.COMPLIANCE_OFFICER)
+
+# Fixed, printed, and worthless: this account only ever exists on a throwaway
+# database that the demo drops on exit.
+DEMO_PASSWORD = "demo-password-not-for-production"  # noqa: S105
+DEMO_TOTP_SECRET = "JBSWY3DPEHPK3PXP"  # noqa: S105
 
 # Three rules, chosen so one transaction hits each outcome. Kept small on
 # purpose: the demo is a proof that decisions happen, not a tour of the DSL.
@@ -75,6 +82,15 @@ class Command(BaseCommand):
             action="store_true",
             help="Print only the API key, for scripts that want to capture it.",
         )
+        parser.add_argument(
+            "--dashboard",
+            action="store_true",
+            help=(
+                "Also create two sign-in accounts and a rule awaiting approval, so the "
+                "dashboard has something to show. Used to capture the screenshots in "
+                "the README."
+            ),
+        )
 
     def handle(self, *args, **options) -> None:
         from complylayer.models import ApiKey, Tenant
@@ -111,6 +127,9 @@ class Command(BaseCommand):
                 rule, version = lifecycle.activate(rule=rule, actor=OFFICER)
                 say(f"      {rule.id}  {rule.name}  [{rule.severity}]")
 
+        if options["dashboard"]:
+            self._seed_dashboard(tenant, say)
+
         say()
         say(f"      author   {ANALYST.id} ({ANALYST.role})")
         say(f"      approver {OFFICER.id} ({OFFICER.role})")
@@ -120,3 +139,111 @@ class Command(BaseCommand):
 
         # Last line, always, so a script can take it with `tail -1`.
         self.stdout.write(full_key)
+
+    def _seed_history(self, tenant, count: int = 400) -> None:
+        """Enough decision history for the approval page to backtest against.
+
+        The impact panel is a real backtest over recorded decisions now, and it
+        renders nothing at all when there is no history — which is correct, and
+        which would make the screenshot show an empty panel. So the demo gets a
+        plausible spread: mostly small transfers, a tail of large ones.
+        """
+        from datetime import timedelta
+
+        from complylayer.models import Decision
+
+        moment = datetime.now(UTC)
+        rows = []
+        for index in range(count):
+            # Three bands, so the approval diff has something to say: one in
+            # eight clears ₦100,000 (both the current rule and the proposed
+            # one), one in eight sits between the two thresholds (the current
+            # rule only), the rest are ordinary transfers.
+            if index % 8 == 0:
+                amount = 10_500_000 + index * 40_000
+            elif index % 8 == 4:
+                amount = 1_500_000 + index * 15_000
+            else:
+                amount = 20_000 + index * 37
+            rows.append(
+                Decision(
+                    id=f"dec_seed_{index:04d}",
+                    tenant=tenant,
+                    decided_at=moment - timedelta(minutes=index),
+                    idempotency_key=f"seed-{index:04d}",
+                    ruleset_version=1,
+                    transaction_ref=f"TXN-SEED-{index:04d}",
+                    customer_ref_hash="s" * 64,
+                    amount_minor=amount,
+                    currency="NGN",
+                    context={},
+                    resolved_facts={"amount_minor": amount, "currency": "NGN"},
+                    outcome="block" if amount > 1_000_000 else "allow",
+                    latency_ms=5,
+                )
+            )
+        Decision.objects.bulk_create(rows, ignore_conflicts=True)
+
+    def _seed_dashboard(self, tenant, say) -> None:
+        """Two sign-in accounts and a rule waiting to be approved.
+
+        The approval diff compares a pending rule against the most recent other
+        rule of the same *name*, so a diff needs two rows: the active one and
+        the proposed replacement. Without that second row the approval page
+        renders with nothing to compare and the screenshot shows an empty panel.
+
+        The TOTP secret is fixed and printed. That is fine here and nowhere
+        else: this account exists on a throwaway database that is dropped when
+        the demo exits.
+        """
+        from django.contrib.auth.models import User
+
+        from complylayer.models import DashboardUser, Rule
+
+        for actor, password in ((ANALYST, DEMO_PASSWORD), (OFFICER, DEMO_PASSWORD)):
+            user, created = User.objects.get_or_create(
+                username=actor.id, defaults={"email": actor.id}
+            )
+            if created:
+                user.set_password(password)
+                user.save(update_fields=["password"])
+            DashboardUser.objects.get_or_create(
+                user=user,
+                defaults={
+                    "tenant": tenant,
+                    "role": str(actor.role),
+                    "totp_secret": DEMO_TOTP_SECRET,
+                    "totp_confirmed_at": datetime.now(UTC),
+                },
+            )
+
+        # The proposed change: the same rule, ten times looser. This is the case
+        # the approval diff exists for — a reviewer scanning a text diff sees one
+        # character move and approves it.
+        active = (
+            Rule.objects.filter(tenant=tenant, name=RULES[0]["name"]).order_by("-version").first()
+        )
+        # A proposed replacement is a new *version* of the same name — the model
+        # is unique on (tenant, name, version), and the approval view finds the
+        # thing to diff against by name. Reusing version 1 fails the constraint,
+        # which is the schema saying the same thing.
+        proposed = lifecycle.create_draft(
+            tenant_id=tenant.id,
+            actor=ANALYST,
+            **{
+                **RULES[0],
+                "expression": "amount_minor > 10000000",
+                "version": (active.version if active else 1) + 1,
+            },
+        )
+        lifecycle.request_approval(rule=proposed, actor=ANALYST)
+
+        self._seed_history(tenant)
+
+        say()
+        say("      dashboard  http://127.0.0.1:8421/dashboard/sign-in")
+        say(f"      sign in as {OFFICER.id} / {DEMO_PASSWORD}")
+        say(f"      TOTP secret {DEMO_TOTP_SECRET}")
+        say(f"      {proposed.id} is awaiting approval: ₦10,000 → ₦100,000")
+        if active is None:  # pragma: no cover - defensive, the seed just made it
+            say("      (no active version to diff against)")
