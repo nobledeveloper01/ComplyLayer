@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
-from complylayer.models import Decision, NamedList, Rule, RuleSetVersion
+from complylayer.models import ApiKey, Decision, NamedList, Rule, RuleSetVersion
 
 
 class RuleSerializer(serializers.ModelSerializer):
@@ -83,3 +83,31 @@ class NamedListSerializer(serializers.ModelSerializer):
         model = NamedList
         fields = ["name", "values", "updated_by", "updated_at"]
         read_only_fields = ["updated_by", "updated_at"]
+
+
+class ApiKeySerializer(serializers.ModelSerializer):
+    """A key, as everyone other than its creator ever sees it.
+
+    `hashed_secret` is not a field here and never will be. The secret itself
+    exists in the clear exactly once, in the response to the request that
+    created it — after that the database holds an Argon2id hash and there is no
+    way back, which is the property that makes a leaked database not a leaked
+    set of credentials.
+    """
+
+    active = serializers.BooleanField(source="is_active", read_only=True)
+
+    class Meta:
+        model = ApiKey
+        fields = [
+            "id",
+            "name",
+            "prefix",
+            "environment",
+            "role",
+            "created_by",
+            "created_at",
+            "revoked_at",
+            "active",
+        ]
+        read_only_fields = ["id", "prefix", "created_by", "created_at", "revoked_at", "active"]

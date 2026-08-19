@@ -76,7 +76,7 @@ endpoint more than once, opening the dashboard to take a photograph.
 | Velocity rules work | Returned 500. `_gather` handed back the constructor's provider, which production never sets, so the functions bound to `None` | `make demo`, first run |
 | The dashboard has a second factor | A stolen password reached `/dashboard/enrol`, which issued a fresh TOTP secret on render and destroyed the owner's | Writing the exploit |
 | API keys are 192-bit secrets | The verification cache was keyed on the 16-character prefix, which is public by design, and a hit skipped the secret entirely | Writing the exploit |
-| Keys can be revoked | `revoke_from_cache` had no caller outside the tests, and nothing re-read `revoked_at` | Grepping for callers |
+| Keys can be revoked | `revoke_from_cache` had no caller outside the tests, nothing re-read `revoked_at`, and there was no endpoint at all — revocation meant an `UPDATE` typed into psql | Grepping for callers |
 | Row level security isolates tenants | `tenant_scope()` had no caller in production code at all. The setting was NULL on every request, so every policy matched nothing | Running the app as `complylayer_app` |
 | …and covers every tenant table | `complylayer_dashboarduser`, which holds every user's TOTP secret, had no policy | A test comparing models against the migration |
 | Customer references are pseudonymised | The HMAC key defaulted to the tenant id — a column on every row it protects | Reading the one line that used it |
@@ -398,6 +398,19 @@ down by the exploits that used to work:
   is read every request, so revocation takes effect on the next call in every
   worker. Measured at **0.19 ms p50** against a 3 ms budget, while the cache still
   saves 26 ms — the query was never the expensive part.
+
+**Keys are issued and revoked through the product** (`/v1/keys`), not through a
+database client. Two properties make that endpoint safe to expose:
+
+- **A key may only be issued with permissions its issuer already holds.** The
+  check is a subset of the permission matrix, not a seniority comparison — roles
+  are not ranked, and a separate who-may-issue-what table would drift from the
+  matrix beside it. Without it, an integration credential is one request away
+  from being able to activate compliance rules.
+- **There is no update and no delete.** A key's role is what it was issued as,
+  because a key that can be re-pointed makes its own past decisions
+  unexplainable; and revocation sets `revoked_at` rather than removing the row,
+  because decisions reference the key that made them.
 
 ### `complylayer/tenancy` — three layers, and the three ways they were inert
 
@@ -734,6 +747,9 @@ connecting role, and `--strict` fails on a superuser.
 | POST | `/v1/decisions/{id}/review` | Record a reviewer's outcome — what rule analytics rests on |
 | GET/POST | `/v1/lists` | Named lists a rule refers to by name |
 | GET/PATCH/DELETE | `/v1/lists/{id}` | One list |
+| GET/POST | `/v1/keys` | List and issue API keys. The secret is returned once. |
+| GET | `/v1/keys/{id}` | One key, never its secret |
+| POST | `/v1/keys/{id}/revoke` | Stop a key on its next request |
 
 The serialisers make `state`, `version`, `created_by`, `approved_by`,
 `approved_at` and `activated_at` read-only. A `PATCH` that could set
@@ -1095,7 +1111,7 @@ server/settings.py        the decision workload
 server/settings_management.py  the management workload — different URLconf and
                           middleware, which is the whole of D7
 server/boot.py            the refusal to start on published secrets
-tests/                    967 tests; the escape corpus, isolation, chaos,
+tests/                    987 tests; the escape corpus, isolation, chaos,
                           determinism and RLS suites are blocking gates
 docs/ROADMAP.md           the nine phases and their exit gates
 docs/plan-architecture.md D1–D14: what the specification left open
@@ -1172,7 +1188,8 @@ latency budget and reproducible decisions — the three claims §13 rests on. Ph
 | Node SDK, required `fallback` | Done |
 | Release pipeline: PyPI, npm, ghcr, cosign, trivy | Done — every action SHA-pinned |
 | Preflight for the silent failure modes | Done — 8 checks, each with its remediation |
-| **967 tests, 93.3% coverage** | |
+| Key management: issue, list, revoke, no escalation | Done — a key cannot mint one with permissions it lacks |
+| **987 tests, 93.5% coverage** | |
 
 Deliberately not built, deferred to v1.1: OIDC beside the TOTP sign-in, Python and
 Go SDKs, a Helm chart, and the hosted product. A signed external anchor for the

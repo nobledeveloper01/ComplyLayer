@@ -47,6 +47,7 @@ class Action(StrEnum):
     REVERT = "revert"
     EMERGENCY_OVERRIDE = "emergency_override"
     REVIEW_DECISION = "review_decision"
+    MANAGE_KEYS = "manage_keys"
 
 
 # Everyone can backtest. It is a read of history that changes nothing, and an
@@ -68,6 +69,7 @@ PERMISSIONS: dict[Role, frozenset[Action]] = {
         Action.ARCHIVE,
         Action.REVERT,
         Action.REVIEW_DECISION,
+        Action.MANAGE_KEYS,
     },
     Role.RISK_MANAGER: _EVERYONE
     | {
@@ -81,9 +83,13 @@ PERMISSIONS: dict[Role, frozenset[Action]] = {
         Action.REVERT,
         Action.EMERGENCY_OVERRIDE,
         Action.REVIEW_DECISION,
+        Action.MANAGE_KEYS,
     },
-    # Read and backtest. Nothing that changes a control.
-    Role.ENGINEER: _EVERYONE,
+    # Read, backtest, and issue integration credentials — wiring ComplyLayer
+    # into a transaction service is the engineer's job. Still nothing that
+    # changes a control, and `may_issue` below stops a key being used to mint a
+    # more powerful one.
+    Role.ENGINEER: _EVERYONE | {Action.MANAGE_KEYS},
     Role.AUDITOR: _EVERYONE,
 }
 
@@ -102,6 +108,20 @@ class Actor:
         return {"type": "user", "id": self.id, "role": str(self.role), "ip": self.ip}
 
 
+def _article(word: str) -> str:
+    """ "an engineer", not "a engineer".
+
+    A permission refusal is a sentence a customer reads, and this product's
+    error messages are written rather than formatted.
+    """
+    return "an" if word[:1].lower() in "aeiou" else "a"
+
+
+def _describe(role: Role) -> str:
+    words = role.replace("_", " ")
+    return f"{_article(words)} {words}"
+
+
 class PermissionDenied(PermissionError):
     """Refused on role, or refused because the actor is the author."""
 
@@ -118,9 +138,36 @@ def may(role: Role, action: Action) -> bool:
 def require(actor: Actor, action: Action) -> None:
     if not may(actor.role, action):
         raise PermissionDenied(
-            f"a {actor.role.replace('_', ' ')} cannot {action.replace('_', ' ')}",
+            f"{_describe(actor.role)} cannot {action.replace('_', ' ')}",
             actor,
             action,
+        )
+
+
+def may_issue(actor_role: Role, target_role: Role) -> bool:
+    """Whether `actor_role` may create a key that acts as `target_role`.
+
+    The rule is subset, not seniority: a key may only be issued with permissions
+    its issuer already holds. Roles are not ordered — an engineer is not "below"
+    an auditor, they can do different things — so comparing rank would be
+    meaningless, and a table of who-may-issue-what is a table that drifts from
+    the permission matrix beside it.
+
+    This is the whole defence against a key management endpoint becoming a
+    privilege escalation: without it, an engineer's key could mint a compliance
+    officer's key and activate its own rules.
+    """
+    return PERMISSIONS[target_role] <= PERMISSIONS[actor_role]
+
+
+def require_issuable(actor: Actor, target_role: Role) -> None:
+    if not may_issue(actor.role, target_role):
+        raise PermissionDenied(
+            f"{_describe(actor.role)} cannot issue a key that acts as "
+            f"{_describe(target_role)}; a key cannot carry permissions its "
+            "issuer does not have",
+            actor,
+            Action.MANAGE_KEYS,
         )
 
 

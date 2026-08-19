@@ -7,7 +7,9 @@ from complylayer.tenancy.roles import (
     PermissionDenied,
     Role,
     may,
+    may_issue,
     require,
+    require_issuable,
     require_not_author,
 )
 from complylayer.tenancy.scope import current_tenant, tenant_scope
@@ -20,7 +22,9 @@ __all__ = [
     "Role",
     "current_tenant",
     "may",
+    "may_issue",
     "require",
+    "require_issuable",
     "require_not_author",
     "tenant_scope",
 ]

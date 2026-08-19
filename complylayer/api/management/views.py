@@ -14,14 +14,19 @@ away.
 
 from __future__ import annotations
 
+import secrets
+from datetime import UTC, datetime
+
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 
 from complylayer import audit, rules
+from complylayer.api import auth
 from complylayer.api.management.permissions import IsAuthenticatedKey
 from complylayer.api.management.serializers import (
+    ApiKeySerializer,
     DecisionSerializer,
     NamedListSerializer,
     RuleSerializer,
@@ -29,9 +34,9 @@ from complylayer.api.management.serializers import (
 )
 from complylayer.dsl import RuleSyntaxError, validate_source
 from complylayer.dsl.structured import to_expression
-from complylayer.models import Decision, NamedList, Rule, RuleSetVersion
+from complylayer.models import ApiKey, Decision, NamedList, Rule, RuleSetVersion
 from complylayer.rules.lifecycle import LifecycleError
-from complylayer.tenancy import Action, PermissionDenied
+from complylayer.tenancy import Action, PermissionDenied, Role, require, require_issuable
 
 
 class TenantScopedViewSet(viewsets.ModelViewSet):
@@ -257,3 +262,104 @@ class NamedListViewSet(TenantScopedViewSet):
             subject={"type": "named_list", "id": instance.name},
             payload={"values": instance.values, "ruleset_version": version.version},
         )
+
+
+class ApiKeyViewSet(TenantScopedViewSet):
+    """Issuing and revoking the credentials that reach the decision endpoint.
+
+    **This existed as a table and a security review finding before it existed as
+    an endpoint.** The README said keys could be revoked; the only way to do it
+    was an `UPDATE` typed into psql by whoever was awake. A product whose
+    incident response step is "ask someone with database access" does not have
+    incident response.
+
+    Three deliberate absences:
+
+    - **No update.** A key's role and environment are what it was issued as. A
+      key that can be re-pointed at another role is a key whose past decisions
+      cannot be explained, and §8.3's audit trail would be recording a subject
+      that no longer means what it meant.
+    - **No delete.** Revocation sets `revoked_at`; the row stays. Decisions
+      reference the key that made them, and deleting it makes six months of
+      audit history unattributable.
+    - **No way to read a secret back.** It is returned once, by `create`, and
+      the database holds only the Argon2id hash.
+    """
+
+    queryset = ApiKey.objects.all()
+    serializer_class = ApiKeySerializer
+    http_method_names = ["get", "post", "head", "options"]
+
+    def create(self, request, *args, **kwargs):
+        """Issue a key. The secret is in this response and nowhere else, ever."""
+        require(self.actor, Action.MANAGE_KEYS)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            target = Role(serializer.validated_data["role"])
+        except ValueError:
+            raise ValidationError(
+                {"role": f"Not a role. One of: {[str(r) for r in Role]}"}
+            ) from None
+
+        # The escalation guard. Without it this endpoint is a way for any key
+        # that may issue keys to grant itself permissions it does not have.
+        require_issuable(self.actor, target)
+
+        environment = serializer.validated_data.get("environment", "live")
+        full_key, prefix = auth.generate_key(environment)
+        key = ApiKey.objects.create(
+            id=f"key_{secrets.token_hex(8)}",
+            tenant_id=self.tenant_id,
+            name=serializer.validated_data["name"],
+            prefix=prefix,
+            hashed_secret=auth.hash_secret(full_key),
+            environment=environment,
+            role=str(target),
+            created_by=self.actor.id,
+        )
+
+        audit.append(
+            tenant_id=self.tenant_id,
+            event_type="apikey.issued",
+            actor=self.actor.as_audit_actor(),
+            subject={"type": "api_key", "id": key.id},
+            # The prefix, never the secret. An audit trail holding a live
+            # credential is a second place to steal it from.
+            payload={"prefix": prefix, "role": str(target), "environment": environment},
+        )
+
+        body = self.get_serializer(key).data
+        body["secret"] = full_key
+        body["warning"] = "This is the only time the secret is shown. Store it now."
+        return Response(body, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def revoke(self, request, pk=None):
+        """Stop a key, now.
+
+        `revoked_at` is read on every authentication, so this takes effect on
+        the key's next request in every worker — not when a cache expires. The
+        in-process eviction below is hygiene rather than the mechanism; see
+        `complylayer/api/auth.py` for why that distinction cost a finding.
+        """
+        require(self.actor, Action.MANAGE_KEYS)
+        key = self.get_object()
+
+        if key.revoked_at is not None:
+            raise LifecycleError("that key is already revoked")
+
+        key.revoked_at = datetime.now(UTC)
+        key.save(update_fields=["revoked_at"])
+        auth.revoke_from_cache(key.prefix)
+
+        audit.append(
+            tenant_id=self.tenant_id,
+            event_type="apikey.revoked",
+            actor=self.actor.as_audit_actor(),
+            subject={"type": "api_key", "id": key.id},
+            payload={"prefix": key.prefix, "reason": request.data.get("reason", "")},
+        )
+        return Response(self.get_serializer(key).data)

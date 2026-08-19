@@ -505,6 +505,90 @@ paths:
       responses:
         '204': { description: Deleted. }
 
+  /v1/keys:
+    get:
+      tags: [Keys]
+      operationId: listApiKeys
+      summary: List this tenant's API keys
+      description: |
+        Never includes a secret. The secret exists in the clear exactly once, in
+        the response that created it; the database holds an Argon2id hash and
+        there is no way back.
+      responses:
+        '200':
+          description: A page of keys.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedApiKeys' }
+    post:
+      tags: [Keys]
+      operationId: createApiKey
+      summary: Issue an API key
+      description: |
+        **A key may only be issued with permissions its issuer already holds.**
+        Roles are not ranked, so the check is a subset of the permission matrix
+        rather than a seniority comparison: an engineer's key cannot mint a
+        compliance officer's, which would otherwise turn this endpoint into a
+        privilege escalation.
+
+        The response carries `secret`, once. Store it before you close the
+        connection.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewApiKey' }
+      responses:
+        '201':
+          description: The key, including the only copy of its secret.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IssuedApiKey' }
+        '403':
+          description: The issuer may not grant that role.
+  /v1/keys/{id}:
+    get:
+      tags: [Keys]
+      operationId: getApiKey
+      summary: One key
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The key, without its secret.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiKey' }
+        '404':
+          description: No such key for this tenant.
+  /v1/keys/{id}/revoke:
+    post:
+      tags: [Keys]
+      operationId: revokeApiKey
+      summary: Revoke a key
+      description: |
+        Takes effect on the key's next request, in every worker — `revoked_at`
+        is read on each authentication rather than waiting for a cache to
+        expire. The row is never deleted: decisions reference the key that made
+        them, and removing it would make the audit history unattributable.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: The revoked key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiKey' }
+        '409':
+          description: Already revoked.
   /healthz:
     get:
       tags: [Operations]
@@ -602,6 +686,53 @@ components:
           schema: { $ref: '#/components/schemas/RuleError' }
 
   schemas:
+    ApiKey:
+      type: object
+      properties:
+        id: { type: string, example: key_9f2c1a04 }
+        name: { type: string, example: ledger service }
+        prefix:
+          type: string
+          description: |
+            Stored in the clear so a dashboard can show which key is which. It
+            identifies a key; it does not authenticate one.
+          example: cl_live_K4CwGFHa
+        environment: { type: string, enum: [test, live] }
+        role:
+          type: string
+          enum: [compliance_analyst, compliance_officer, risk_manager, engineer, auditor]
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        active: { type: boolean }
+    NewApiKey:
+      type: object
+      required: [name, role]
+      properties:
+        name: { type: string, example: ledger service }
+        role:
+          type: string
+          enum: [compliance_analyst, compliance_officer, risk_manager, engineer, auditor]
+        environment: { type: string, enum: [test, live], default: live }
+    IssuedApiKey:
+      allOf:
+        - $ref: '#/components/schemas/ApiKey'
+        - type: object
+          properties:
+            secret:
+              type: string
+              description: The only time this is ever returned.
+              example: cl_live_K4CwGFHa2LwyiHj4biYM0xVobT0pkBzN
+            warning: { type: string }
+    PaginatedApiKeys:
+      type: object
+      properties:
+        count: { type: integer }
+        next: { type: string, nullable: true }
+        previous: { type: string, nullable: true }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/ApiKey' }
     DecisionRequest:
       type: object
       additionalProperties: false

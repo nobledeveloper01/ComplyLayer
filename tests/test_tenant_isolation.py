@@ -111,7 +111,48 @@ def owned_by_a(tenant_a):
         "ruleset": version,
         "decision": decision,
         "list": named_list,
+        # The credential itself is a tenant-scoped resource like any other, and
+        # the one whose leak would undo the rest.
+        "key": ApiKey.objects.get(id="key_alpha"),
     }
+
+
+class TestApiKeysAcrossTenants:
+    """Keys are the credential that reaches every other route, so a key visible
+    across a tenant boundary would undo the other three layers at once.
+
+    Issuing and the escalation guard live in `tests/test_key_management.py`;
+    what belongs in the mandatory suite is the isolation, alongside every other
+    management route.
+    """
+
+    def test_another_tenants_key_is_not_found(self, owned_by_a, tenant_b):
+        _, key_b = tenant_b
+        response = client_for(key_b).get(f"/v1/keys/{owned_by_a['key'].id}/")
+        assert response.status_code == 404, "a 403 would confirm the key id is real"
+
+    def test_another_tenants_key_cannot_be_revoked(self, owned_by_a, tenant_b):
+        _, key_b = tenant_b
+        response = client_for(key_b).post(f"/v1/keys/{owned_by_a['key'].id}/revoke/")
+        assert response.status_code == 404
+
+        owned_by_a["key"].refresh_from_db()
+        assert owned_by_a["key"].revoked_at is None, "tenant B revoked tenant A's credential"
+
+    def test_a_list_carries_only_this_tenants_keys(self, owned_by_a, tenant_b):
+        _, key_b = tenant_b
+        body = client_for(key_b).get("/v1/keys/").json()
+        rows = body["results"] if isinstance(body, dict) else body
+        assert all(row["id"] != owned_by_a["key"].id for row in rows)
+
+    def test_no_secret_is_ever_in_a_listing(self, owned_by_a, tenant_a):
+        _, key_a = tenant_a
+        body = client_for(key_a).get("/v1/keys/").json()
+        rows = body["results"] if isinstance(body, dict) else body
+        assert rows, "tenant A should see its own key"
+        for row in rows:
+            assert "secret" not in row
+            assert "hashed_secret" not in row
 
 
 class TestReadsAcrossTenants:
@@ -231,6 +272,9 @@ class TestEveryRouteIsCovered:
         "decision-review",
         "list-list",
         "list-detail",
+        "key-list",
+        "key-detail",
+        "key-revoke",
     }
 
     # Dashboard routes are session-authenticated rather than key-authenticated,

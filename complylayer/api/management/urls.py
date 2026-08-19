@@ -9,6 +9,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from complylayer.api.management.views import (
+    ApiKeyViewSet,
     DecisionViewSet,
     NamedListViewSet,
     RuleSetVersionViewSet,
@@ -20,5 +21,6 @@ router.register("rules", RuleViewSet, basename="rule")
 router.register("rulesets", RuleSetVersionViewSet, basename="ruleset")
 router.register("decisions", DecisionViewSet, basename="decision")
 router.register("lists", NamedListViewSet, basename="list")
+router.register("keys", ApiKeyViewSet, basename="key")
 
 urlpatterns = [path("v1/", include(router.urls))]
