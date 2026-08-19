@@ -37,10 +37,12 @@ TENANT_SCOPED_TABLES = [
     # table, which tests/test_rls_every_table.py checks against the models, so
     # it is extended rather than the operations below.
     "complylayer_dashboarduser",
+    # And complylayer_auditcheckpoint from 0011, for the same reason.
+    "complylayer_auditcheckpoint",
 ]
 
 # What migration 0005 itself created. The list above grew afterwards.
-INITIAL_TABLES = TENANT_SCOPED_TABLES[:-1]
+INITIAL_TABLES = TENANT_SCOPED_TABLES[:-2]
 
 
 def _enable(table: str) -> str:

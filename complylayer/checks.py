@@ -367,6 +367,43 @@ def check_transport_security(
     )
 
 
+def check_audit_anchoring(private_key: str, public_key: str, debug: bool) -> CheckResult:
+    """Whether anything outside the database vouches for the audit trail.
+
+    The chain is unkeyed SHA-256, so it catches a record altered in place and
+    not a rewrite that recomputes every hash after it. Without a checkpoint key
+    the trail is exactly as strong as the write access around it, and §8.3's
+    claim that immutability is enforced quietly narrows to "enforced against
+    accidents".
+
+    A warning rather than a failure: a self-hoster evaluating the product should
+    not be blocked, and `--strict` promotes it for the pipeline that ships.
+    """
+    if private_key and public_key:
+        return CheckResult(
+            name="audit anchoring",
+            ok=True,
+            detail="chain heads are signed and verifiable",
+        )
+
+    missing = []
+    if not private_key:
+        missing.append("COMPLYLAYER_CHECKPOINT_PRIVATE_KEY")
+    if not public_key:
+        missing.append("COMPLYLAYER_CHECKPOINT_PUBLIC_KEY")
+
+    return CheckResult(
+        name="audit anchoring",
+        ok=False,
+        fatal=not debug,
+        detail=f"not set: {', '.join(missing)} — nothing external anchors the audit chain",
+        remediation="Generate a pair with `manage.py complylayer_checkpoint --generate-key`, "
+        "keep the private half in a secret manager rather than in this database, and run "
+        "`manage.py complylayer_checkpoint` on a schedule. The interval between runs is the "
+        "window in which a rewrite is undetectable.",
+    )
+
+
 def summarise(results: list[CheckResult]) -> tuple[int, int]:
     """Return (failures, warnings). The exit code is the count of fatal failures."""
     failures = sum(1 for r in results if not r.ok and r.fatal)

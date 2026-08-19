@@ -112,6 +112,15 @@ COMPLYLAYER = {
     # It belongs in a secret manager rather than beside the database, so that a
     # database copy does not carry its own key.
     "CUSTOMER_SALT": _env("COMPLYLAYER_CUSTOMER_SALT", INSECURE_CUSTOMER_SALT),
+    # Ed25519, PEM. The private half signs audit chain checkpoints and belongs
+    # in a secret manager — anywhere but the database it anchors, because the
+    # whole guarantee is that an attacker with write access cannot forge a
+    # signature. The public half is what `/v1/audit/verify` checks against, and
+    # a customer's auditor can hold a copy.
+    #
+    # Unset means unanchored, and verification says so rather than passing.
+    "CHECKPOINT_PRIVATE_KEY": _env("COMPLYLAYER_CHECKPOINT_PRIVATE_KEY", ""),
+    "CHECKPOINT_PUBLIC_KEY": _env("COMPLYLAYER_CHECKPOINT_PUBLIC_KEY", ""),
     # Metrics are labelled by tenant, which makes /metrics a customer list, and
     # it is served on the same port as the decision endpoint. Unset means open,
     # because a self-hoster reading their own numbers on a laptop should not

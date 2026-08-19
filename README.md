@@ -499,11 +499,26 @@ The chain is per tenant rather than global — one global chain would serialise 
 busy tenant's writes behind everyone else's, and would leak the fact of one
 tenant's activity into another's verification.
 
-**The honest limitation**, since customers will lean on this: the chain is
-unkeyed SHA-256. It detects a record altered in place. It does **not** detect an
-attacker with write access who recomputes the chain forward from the tamper point,
-because nothing external anchors it. Grants and the trigger cover the database
-path; a signed external checkpoint would cover the rest and is not built.
+**The limitation that used to be open, and how it is closed.** The chain is
+unkeyed SHA-256, so an attacker with write access can edit a record and recompute
+every hash after it. The result is a valid chain of the wrong history, and
+`verify_chain` is satisfied by it — recomputing is arithmetic, not forgery.
+
+A fifth mechanism closes that: **signed checkpoints**. `complylayer_checkpoint`
+signs the chain head with an Ed25519 key that is deliberately not in the database
+it anchors. A rewrite still produces a consistent chain; it cannot produce a
+signature over that chain without the private key.
+
+The signed payload carries the chain *length* as well as the head hash, because
+otherwise an attacker could delete everything after an older checkpoint and
+present its signature as current.
+
+Two honest limits remain, stated rather than papered over. **The interval between
+checkpoint runs is the window in which a rewrite is undetectable** — a tamper at
+10:05 against a chain last signed at 10:00 is invisible until the next run.
+And with no key configured, verification reports `unanchored` rather than
+passing: a check that cannot fail is a check that means nothing, and this answer
+goes to a customer's auditor.
 
 ### `complylayer/rules` — the lifecycle and separation of duties
 
@@ -1005,6 +1020,8 @@ the day is not a check.
 | `COMPLYLAYER_DB_HOST` / `_PORT` / `_NAME` / `_USER` / `_PASSWORD` | no | localhost, 5432, `complylayer` | Primary. Connect as `complylayer_app` in production. |
 | `COMPLYLAYER_REPLICA_HOST` / `_PORT` | no | the primary's | Backtests, reports and dashboard queries read here |
 | `COMPLYLAYER_REDIS_URL` | no | `redis://127.0.0.1:6379/2` | Velocity windows, cross-worker gauges, the sign-in throttle |
+| `COMPLYLAYER_CHECKPOINT_PRIVATE_KEY` | no | — | Ed25519 PEM signing audit chain heads. Unset means the chain has no external anchor and `complylayer_doctor` says so. Belongs in a secret manager, never beside the database it anchors. |
+| `COMPLYLAYER_CHECKPOINT_PUBLIC_KEY` | no | — | Verifies those signatures. A customer's auditor can hold a copy. |
 | `COMPLYLAYER_METRICS_TOKEN` | no | — | Scrape token for `/metrics`. Unset leaves it open, which is fine on a laptop and not anywhere else — the series are labelled by tenant. |
 | `COMPLYLAYER_WATCH_VERSIONS` | no | `1` | The thread keeping each worker's rule cache current. Off means propagation waits for a restart. |
 | `COMPLYLAYER_LOG_LEVEL` | no | `INFO` | |
@@ -1092,7 +1109,8 @@ complylayer/api/          the decision endpoint, hand-written validation, key
                           auth, the middleware that assembles a request
 complylayer/api/management/  the DRF management API and its permission classes
 complylayer/tenancy/      roles and permissions; SET LOCAL tenant scoping
-complylayer/audit/        the hash chain and its verifier
+complylayer/audit/        the hash chain, its verifier, and the Ed25519
+                          checkpoints that anchor it outside the database
 complylayer/rules/        the lifecycle state machine and approvals
 complylayer/dashboard/    server-rendered views, rule builder, approval diff,
                           two-step auth, the sign-in throttle
@@ -1111,7 +1129,7 @@ server/settings.py        the decision workload
 server/settings_management.py  the management workload — different URLconf and
                           middleware, which is the whole of D7
 server/boot.py            the refusal to start on published secrets
-tests/                    987 tests; the escape corpus, isolation, chaos,
+tests/                    1,011 tests; the escape corpus, isolation, chaos,
                           determinism and RLS suites are blocking gates
 docs/ROADMAP.md           the nine phases and their exit gates
 docs/plan-architecture.md D1–D14: what the specification left open
@@ -1176,7 +1194,8 @@ latency budget and reproducible decisions — the three claims §13 rests on. Ph
 | Latency budget, itemised and measured | Done — evaluation p99 0.261 ms; DRF costs +0.158 ms |
 | Monthly partitioning, default-partition alarm | Done |
 | Tenant isolation: key, query layer, row level security | Done — a full decision served as `complylayer_app` |
-| Audit hash chain, append-only by trigger | Done — unkeyed; no external anchor |
+| Audit hash chain, append-only by trigger | Done |
+| Signed checkpoints anchoring the chain | Done — Ed25519, key outside the database; catches a full rewrite |
 | Management API, approval workflow, separation of duties | Done — the author cannot self-approve, whatever their role |
 | Dashboard, rule builder, approval diff | Done — every §4.4 rule buildable without the editor |
 | Two-step auth, backoff, single-use codes | Done |
@@ -1187,10 +1206,9 @@ latency budget and reproducible decisions — the three claims §13 rests on. Ph
 | Non-root container on a read-only rootfs | Done — built and smoke-tested in CI |
 | Node SDK, required `fallback` | Done |
 | Release pipeline: PyPI, npm, ghcr, cosign, trivy | Done — every action SHA-pinned |
-| Preflight for the silent failure modes | Done — 8 checks, each with its remediation |
+| Preflight for the silent failure modes | Done — 9 checks, each with its remediation |
 | Key management: issue, list, revoke, no escalation | Done — a key cannot mint one with permissions it lacks |
-| **987 tests, 93.5% coverage** | |
+| **1,011 tests, 92.6% coverage** | |
 
 Deliberately not built, deferred to v1.1: OIDC beside the TOTP sign-in, Python and
-Go SDKs, a Helm chart, and the hosted product. A signed external anchor for the
-audit chain is the one gap in §3 worth closing before a customer leans on it.
+Go SDKs, a Helm chart, and the hosted product.

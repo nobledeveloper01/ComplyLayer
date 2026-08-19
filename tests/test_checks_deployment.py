@@ -207,3 +207,41 @@ class TestTransportSecurityKnowsWhichWorkloadItIsChecking:
     def test_a_workload_with_a_session_still_is(self):
         result = checks.check_transport_security(False, False, 0, False, serves_sessions=True)
         assert not result.ok
+
+
+class TestAuditAnchoring:
+    """The check that reports whether §8.3's claim has an anchor behind it.
+
+    The hash chain catches a record altered in place and not a rewrite that
+    recomputes every hash after it. Without a checkpoint key, "immutability is
+    enforced" quietly narrows to "enforced against accidents".
+    """
+
+    def anchoring(self, private="k", public="p", debug=False):
+        return checks.check_audit_anchoring(private, public, debug)
+
+    def test_both_keys_set_passes(self):
+        assert self.anchoring().ok
+
+    def test_a_missing_private_key_is_reported(self):
+        result = self.anchoring(private="")
+        assert not result.ok
+        assert "CHECKPOINT_PRIVATE_KEY" in result.detail
+
+    def test_a_missing_public_key_is_reported(self):
+        """The private half signs; without the public half nobody can check the
+        signature, which is the same as not having one."""
+        result = self.anchoring(public="")
+        assert not result.ok
+        assert "CHECKPOINT_PUBLIC_KEY" in result.detail
+
+    def test_it_is_fatal_outside_debug(self):
+        assert self.anchoring(private="", public="").fatal is True
+
+    def test_a_laptop_gets_a_warning(self):
+        assert self.anchoring(private="", public="", debug=True).fatal is False
+
+    def test_the_remediation_names_the_window(self):
+        """The interval between checkpoint runs is the period a rewrite is
+        undetectable. Somebody choosing a schedule needs to know that."""
+        assert "window" in self.anchoring(private="", public="").remediation

@@ -63,6 +63,7 @@ def two_tenants_with_rows():
     from complylayer.api import auth
     from complylayer.models import (
         ApiKey,
+        AuditCheckpoint,
         AuditRecord,
         DashboardUser,
         Decision,
@@ -144,6 +145,13 @@ def two_tenants_with_rows():
             tenant=tenant,
             role="compliance_officer",
             totp_secret="JBSWY3DPEHPK3PXP",  # noqa: S106
+        )
+        AuditCheckpoint.objects.create(
+            tenant=tenant,
+            chain_length=1,
+            head_hash="sha256:" + "1" * 64,
+            signed_at=moment,
+            signature="00" * 32,
         )
         made[suffix] = (tenant, full_key)
     return made

@@ -87,3 +87,132 @@ def verify(tenant_id: str):
 
     records = list(AuditRecord.objects.filter(tenant_id=tenant_id).order_by("recorded_at", "id"))
     return verify_chain(records)
+
+
+def write_checkpoint(*, tenant_id: str, private_pem: str, now: datetime | None = None):
+    """Sign this tenant's current chain head.
+
+    Everything before the head is covered, because the head hash already covers
+    everything before it. One signature, not one per record.
+
+    Returns None when the chain is empty — there is nothing to anchor, and a
+    checkpoint over nothing would be a signature an auditor could mistake for a
+    guarantee.
+    """
+    from complylayer.audit import checkpoint as cp
+    from complylayer.models import AuditCheckpoint, AuditRecord
+
+    moment = now or datetime.now(UTC)
+
+    records = AuditRecord.objects.filter(tenant_id=tenant_id).order_by("recorded_at", "id")
+    length = records.count()
+    if length == 0:
+        return None
+
+    head = records.last()
+    signature = cp.sign(
+        private_pem,
+        tenant_id=tenant_id,
+        chain_length=length,
+        head_hash=head.hash,
+        signed_at=moment,
+    )
+    return AuditCheckpoint.objects.create(
+        tenant_id=tenant_id,
+        chain_length=length,
+        head_hash=head.hash,
+        signed_at=moment,
+        signature=signature,
+    )
+
+
+def verify_anchoring(*, tenant_id: str, public_pem: str | None):
+    """Whether the chain matches the last thing anybody signed.
+
+    This is the check that survives an attacker with write access. The chain is
+    unkeyed, so a rewrite that recomputes every hash verifies perfectly against
+    `verify_chain`; it cannot match a signature made with a key that is not in
+    the database.
+
+    Returns UNANCHORED rather than True when no key is configured. A
+    verification that cannot fail means nothing, and this answer goes to a
+    customer's auditor.
+    """
+    from complylayer.audit import checkpoint as cp
+    from complylayer.models import AuditCheckpoint, AuditRecord
+
+    if not public_pem:
+        return cp.CheckpointResult(
+            anchoring=cp.Anchoring.UNANCHORED,
+            detail=(
+                "No checkpoint public key is configured, so nothing external anchors this "
+                "chain. It will detect a record altered in place and will not detect a "
+                "rewrite that recomputes every hash after it. Set "
+                "COMPLYLAYER_CHECKPOINT_PUBLIC_KEY."
+            ),
+        )
+
+    latest = AuditCheckpoint.objects.filter(tenant_id=tenant_id).order_by("-chain_length").first()
+    if latest is None:
+        return cp.CheckpointResult(
+            anchoring=cp.Anchoring.UNANCHORED,
+            detail="A key is configured but no checkpoint has been written yet.",
+        )
+
+    if not cp.verify_signature(
+        public_pem,
+        latest.signature,
+        tenant_id=tenant_id,
+        chain_length=latest.chain_length,
+        head_hash=latest.head_hash,
+        signed_at=latest.signed_at,
+    ):
+        return cp.CheckpointResult(
+            anchoring=cp.Anchoring.BROKEN,
+            checked_at=latest.signed_at,
+            chain_length=latest.chain_length,
+            detail=(
+                "The stored checkpoint does not verify against the configured public key. "
+                "Either the checkpoint was tampered with or the key is not the one that "
+                "signed it. Both need a human."
+            ),
+        )
+
+    # The signature is good. Now: does the chain still match what was signed?
+    at_signing = (
+        AuditRecord.objects.filter(tenant_id=tenant_id)
+        .order_by("recorded_at", "id")[: latest.chain_length]
+        .values_list("hash", flat=True)
+    )
+    hashes = list(at_signing)
+    if len(hashes) < latest.chain_length:
+        return cp.CheckpointResult(
+            anchoring=cp.Anchoring.BROKEN,
+            checked_at=latest.signed_at,
+            chain_length=latest.chain_length,
+            detail=(
+                f"The last checkpoint signed {latest.chain_length} records and only "
+                f"{len(hashes)} remain. Records have been deleted since it was written."
+            ),
+        )
+
+    if hashes[-1] != latest.head_hash:
+        return cp.CheckpointResult(
+            anchoring=cp.Anchoring.BROKEN,
+            checked_at=latest.signed_at,
+            chain_length=latest.chain_length,
+            detail=(
+                "The chain has been rewritten. Record "
+                f"{latest.chain_length} hashed to {latest.head_hash} when it was signed "
+                f"and hashes to {hashes[-1]} now."
+            ),
+        )
+
+    return cp.CheckpointResult(
+        anchoring=cp.Anchoring.SIGNED,
+        checked_at=latest.signed_at,
+        chain_length=latest.chain_length,
+        detail=(
+            f"Anchored: {latest.chain_length} records, signed {latest.signed_at:%Y-%m-%d %H:%M}Z."
+        ),
+    )

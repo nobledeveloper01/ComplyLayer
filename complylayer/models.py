@@ -287,3 +287,33 @@ class AuditRecord(models.Model):
     class Meta:
         db_table = "complylayer_auditrecord"
         indexes = [models.Index(fields=["tenant", "recorded_at"])]
+
+
+class AuditCheckpoint(models.Model):
+    """A signed statement that the chain looked like this at this moment.
+
+    The one mechanism in §8.3 that survives an attacker with write access. The
+    hash chain is unkeyed, so somebody who can edit a record can recompute every
+    hash after it and produce a chain that verifies. They cannot produce this
+    signature without the private key, which is deliberately not in the database.
+
+    Immutable like the records it anchors: the same append-only trigger applies,
+    because a checkpoint that can be rewritten is a checkpoint that proves
+    whatever the last writer wanted.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="audit_checkpoints")
+
+    # Both, not just the hash. A chain truncated back to an earlier signed head
+    # would verify against that head's signature; the length is what catches it.
+    chain_length = models.IntegerField()
+    head_hash = models.CharField(max_length=80)
+
+    signed_at = models.DateTimeField()
+    signature = models.CharField(max_length=256)
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "complylayer_auditcheckpoint"
+        indexes = [models.Index(fields=["tenant", "-chain_length"])]

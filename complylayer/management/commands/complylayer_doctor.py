@@ -36,6 +36,7 @@ class Command(BaseCommand):
         results.append(self._row_level_security())
         results.append(self._deployment_secrets())
         results.append(self._transport_security())
+        results.append(self._audit_anchoring())
 
         width = max(len(r.name) for r in results)
         for r in results:
@@ -96,6 +97,14 @@ class Command(BaseCommand):
             settings.DEBUG,
             insecure_secret_key=settings.INSECURE_SECRET_KEY,
             insecure_customer_salt=settings.INSECURE_CUSTOMER_SALT,
+        )
+
+    def _audit_anchoring(self) -> checks.CheckResult:
+        """Whether anything outside the database vouches for the audit trail."""
+        return checks.check_audit_anchoring(
+            settings.COMPLYLAYER["CHECKPOINT_PRIVATE_KEY"],
+            settings.COMPLYLAYER["CHECKPOINT_PUBLIC_KEY"],
+            settings.DEBUG,
         )
 
     def _transport_security(self) -> checks.CheckResult:

@@ -65,7 +65,15 @@ def doctor_environment(*, pg_version=160004, db_error=None, redis_client=None, n
         mock.patch(f"{MODULE}.time.time", return_value=now),
         override_settings(
             SECRET_KEY="a-configured-signing-key",  # noqa: S106
-            COMPLYLAYER={**django_settings.COMPLYLAYER, "CUSTOMER_SALT": "a-configured-salt"},
+            COMPLYLAYER={
+                **django_settings.COMPLYLAYER,
+                "CUSTOMER_SALT": "a-configured-salt",
+                # The audit anchoring check joined the same family: a test run
+                # has no checkpoint keys, which is exactly the state that check
+                # exists to report.
+                "CHECKPOINT_PRIVATE_KEY": "a-configured-private-key",
+                "CHECKPOINT_PUBLIC_KEY": "a-configured-public-key",
+            },
             SESSION_COOKIE_SECURE=True,
             CSRF_COOKIE_SECURE=True,
             SECURE_HSTS_SECONDS=31_536_000,
@@ -96,6 +104,9 @@ class TestHealthyDeployment:
             "clock skew",
             "audit trail",
             "row level security",
+            "deployment secrets",
+            "transport security",
+            "audit anchoring",
         ):
             assert name in output
 

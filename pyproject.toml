@@ -18,6 +18,12 @@ dependencies = [
     "pyotp>=2.9",
     "gunicorn>=23.0",
     "uvicorn>=0.34",
+    # Ed25519, for signing audit chain checkpoints. Declared here rather than
+    # relied on transitively: it reaches the venv through semgrep, which is a
+    # *dev* dependency, and the runtime image installs `--no-dev`. Every local
+    # test would have passed against a container that had no cryptography at
+    # all — the same shape as the gunicorn that was missing from this list.
+    "cryptography>=44.0",
 ]
 
 [project.urls]

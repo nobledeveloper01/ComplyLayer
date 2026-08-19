@@ -7,15 +7,20 @@ from complylayer.audit.chain import (
     new_audit_id,
     verify_chain,
 )
-from complylayer.audit.writer import append, correct, verify
+from complylayer.audit.checkpoint import Anchoring, CheckpointResult
+from complylayer.audit.writer import append, correct, verify, verify_anchoring, write_checkpoint
 
 __all__ = [
     "GENESIS",
+    "Anchoring",
+    "CheckpointResult",
     "VerificationResult",
     "append",
     "compute_hash",
     "correct",
     "new_audit_id",
     "verify",
+    "verify_anchoring",
     "verify_chain",
+    "write_checkpoint",
 ]
