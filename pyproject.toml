@@ -9,7 +9,11 @@ authors = [{ name = "ComplyLayer" }]
 keywords = ["compliance", "fintech", "aml", "kyc", "rules-engine"]
 
 dependencies = [
-    "django>=5.0,<6.0",
+    # Upper bound at the next minor, not the next major. 6.1 is verified here —
+    # full suite, migrations, benchmarks and a live decision — and 6.2 is not,
+    # because it does not exist yet. `<7.0` would pre-authorise every release
+    # until Django 7 on the strength of testing exactly one of them.
+    "django>=5.0,<6.2",
     "psycopg[binary]>=3.2",
     "redis>=5.2",
     "orjson>=3.10",
