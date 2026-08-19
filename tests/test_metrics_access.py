@@ -16,7 +16,11 @@ from __future__ import annotations
 import pytest
 from django.test import Client
 
-pytestmark = pytest.mark.django_db
+# `integration` as well as `django_db`, because these need a live Postgres and
+# `make test` excludes integration precisely so a clean checkout can run without
+# Docker. Without this marker that promise was false: `make test` on a machine
+# with no database errored on setup here, and the Makefile said it would not.
+pytestmark = [pytest.mark.integration, pytest.mark.django_db]
 
 TOKEN = "a-scrape-token"  # noqa: S105
 

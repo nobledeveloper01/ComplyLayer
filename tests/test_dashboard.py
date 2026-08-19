@@ -651,6 +651,9 @@ class TestTheDashboardRenders:
         assert "state--reassuring" in content
 
 
+# `integration` as well: these render real templates against a real database,
+# and `make test` excludes integration so a clean checkout runs without Docker.
+@pytest.mark.integration
 @pytest.mark.django_db
 class TestCsrfIsEnforcedOnTheSignInForms:
     """Evidence against a static-analysis finding, and a control worth a test anyway.
