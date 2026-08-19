@@ -58,10 +58,50 @@ it would have done to recorded history.
 Nobody approves their own change, whatever their role. Both screens come from
 `make dashboard`, which seeds this exact state on a throwaway database.
 
-**The demo found a production bug on its first run** — every velocity rule
-returned a 500, with all 958 tests passing, because `_gather` handed back the
-constructor's provider rather than the one it had just built from the factory.
-Tests injected a provider directly; production never does. See §6.
+---
+
+## Controls that were configured and did nothing
+
+This is the part of the project worth reading.
+
+Every row below passed code review, had tests, and did nothing. Not one was
+found by adding another test — the suite was green through all of them. They
+were found by running the thing: starting a server and calling it, dropping the
+database connection to the role the docs recommend, scraping the metrics
+endpoint more than once, opening the dashboard to take a photograph.
+
+| What it claimed | What it did | Found by |
+| --- | --- | --- |
+| `POST /v1/decisions` serves decisions | Raised `AttributeError` on its first real request. 832 tests passed by attaching the handler themselves — the seam every test used was the seam nobody built | Starting the server and calling it |
+| Velocity rules work | Returned 500. `_gather` handed back the constructor's provider, which production never sets, so the functions bound to `None` | `make demo`, first run |
+| The dashboard has a second factor | A stolen password reached `/dashboard/enrol`, which issued a fresh TOTP secret on render and destroyed the owner's | Writing the exploit |
+| API keys are 192-bit secrets | The verification cache was keyed on the 16-character prefix, which is public by design, and a hit skipped the secret entirely | Writing the exploit |
+| Keys can be revoked | `revoke_from_cache` had no caller outside the tests, and nothing re-read `revoked_at` | Grepping for callers |
+| Row level security isolates tenants | `tenant_scope()` had no caller in production code at all. The setting was NULL on every request, so every policy matched nothing | Running the app as `complylayer_app` |
+| …and covers every tenant table | `complylayer_dashboarduser`, which holds every user's TOTP secret, had no policy | A test comparing models against the migration |
+| Customer references are pseudonymised | The HMAC key defaulted to the tenant id — a column on every row it protects | Reading the one line that used it |
+| A forgotten `SECRET_KEY` is caught | Nothing checked. The published default signs the session that carries the second-factor flag | `manage.py check --deploy`, never run |
+| Brute force is impractical | Nothing was rate limited anywhere. Six digits, unlimited guesses | Doing the arithmetic |
+| `complylayer_ruleset_version` detects worker skew | Lived in each worker's own registry. Six scrapes: two returned it, four returned nothing | Scraping twice |
+| The approval screen shows impact | A literal: the same 1,204 of 48,190 for every rule and every tenant | Photographing it |
+| The container runs | The image had never built. `pyproject` points at a README that `.dockerignore` excluded | Building it in CI |
+| semgrep is a security gate | `--config auto` resolves rules over the network at run time; the same tree gave 0 findings one day and 5 the next | A green local run disagreeing with CI |
+
+All of them are self-inflicted — this is a single-author repository, so every
+row is a control I wrote, reviewed and believed. That is the point rather than a
+caveat: the tests were mine too, and they all passed.
+
+**The pattern is always the same.** A control is configured, a test asserts the
+configuration, and nothing ever executes the path production takes. Tests inject
+what production builds; the superuser skips the policy the app role would hit;
+the metric is read once when the bug only appears on the second read. A test
+that supplies the thing under test proves the test works.
+
+Each fix ships with the exploit as a test —
+[`test_api_key_auth.py`](tests/test_api_key_auth.py),
+[`test_rls_every_table.py`](tests/test_rls_every_table.py),
+[`test_decision_wiring.py`](tests/test_decision_wiring.py) — because a fix
+without the failure beside it is a fix nobody can tell got undone.
 
 ---
 
