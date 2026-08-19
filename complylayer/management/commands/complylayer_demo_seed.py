@@ -32,9 +32,11 @@ ANALYST = Actor(id="ada@demo.ng", role=Role.COMPLIANCE_ANALYST)
 OFFICER = Actor(id="chidi@demo.ng", role=Role.COMPLIANCE_OFFICER)
 
 # Fixed, printed, and worthless: this account only ever exists on a throwaway
-# database that the demo drops on exit.
-DEMO_PASSWORD = "demo-password-not-for-production"  # noqa: S105
-DEMO_TOTP_SECRET = "JBSWY3DPEHPK3PXP"  # noqa: S105
+# database that `make dashboard` drops on exit, and the name says so out loud.
+# Suppressed for both linters because they are different tools with different
+# comment syntax — `noqa` alone left `make ci` red on bandit.
+DEMO_PASSWORD = "demo-password-not-for-production"  # noqa: S105  # nosec B105
+DEMO_TOTP_SECRET = "JBSWY3DPEHPK3PXP"  # noqa: S105  # nosec B105
 
 # Three rules, chosen so one transaction hits each outcome. Kept small on
 # purpose: the demo is a proof that decisions happen, not a tour of the DSL.

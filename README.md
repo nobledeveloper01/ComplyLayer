@@ -1095,7 +1095,7 @@ server/settings.py        the decision workload
 server/settings_management.py  the management workload — different URLconf and
                           middleware, which is the whole of D7
 server/boot.py            the refusal to start on published secrets
-tests/                    965 tests; the escape corpus, isolation, chaos,
+tests/                    967 tests; the escape corpus, isolation, chaos,
                           determinism and RLS suites are blocking gates
 docs/ROADMAP.md           the nine phases and their exit gates
 docs/plan-architecture.md D1–D14: what the specification left open
@@ -1172,7 +1172,7 @@ latency budget and reproducible decisions — the three claims §13 rests on. Ph
 | Node SDK, required `fallback` | Done |
 | Release pipeline: PyPI, npm, ghcr, cosign, trivy | Done — every action SHA-pinned |
 | Preflight for the silent failure modes | Done — 8 checks, each with its remediation |
-| **965 tests, 93.8% coverage** | |
+| **967 tests, 93.3% coverage** | |
 
 Deliberately not built, deferred to v1.1: OIDC beside the TOTP sign-in, Python and
 Go SDKs, a Helm chart, and the hosted product. A signed external anchor for the
