@@ -9,7 +9,7 @@
 # never implemented, which is the kind of thing a reader only discovers when
 # their deployment does not do what the comment said.
 
-FROM python:3.12-slim-bookworm AS build
+FROM python:3.12-slim-trixie AS build
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -34,7 +34,17 @@ COPY README.md ./
 RUN uv sync --frozen --no-dev
 
 
-FROM python:3.12-slim-bookworm AS runtime
+# Trixie (Debian 13), not bookworm. The first release dry run failed its image
+# scan on 34 HIGH/CRITICAL findings in the bookworm package set, every one of
+# them with an empty Fixed Version — `affected`, `fix_deferred` or
+# `will_not_fix`, so no amount of rebuilding on bookworm would have cleared
+# them. Moving the floor is the only thing that actually removes a CVE rather
+# than agreeing to overlook it.
+#
+# Both stages move together. A build stage on one Debian and a runtime on
+# another compiles wheels against one glibc and runs them against a different
+# one, which fails at import time and looks like a packaging bug.
+FROM python:3.12-slim-trixie AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
