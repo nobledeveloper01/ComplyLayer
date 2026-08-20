@@ -126,8 +126,15 @@
   --degraded-wash: #201c2c;
 }
 
+/* Only when the reader has explicitly chosen to follow the operating system.
+ *
+ * This used to be `:root:not([data-theme="light"])`, which meant a first visit
+ * with no cookie followed `prefers-color-scheme` — so most people met the
+ * product in dark, and the warm paper palette the design is actually built
+ * around was the one nobody saw. Light is now the default and the OS is opt-in,
+ * which is what the control in the sidebar is for. */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root[data-theme="system"] {
     --ink: #ece8e1;
     --ink-muted: #a8a196;
     --ink-faint: #7a7268;

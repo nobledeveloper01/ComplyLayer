@@ -40,11 +40,63 @@ Sticky, on every screen showing decision data. A reviewer who scrolls past
          {% if section == 'queue' %}aria-current="page"{% endif %}>Review queue</a>
     {% endif %}
     <a class="sidebar__link" href="{% url 'dashboard:sign-out' %}">Sign out</a>
+
+    {% comment %}
+Light, dark, or follow the operating system — the reader's choice, kept in
+       a cookie so it survives a sign-out. Light is the default: this palette is
+       designed as paper and ink, and a first visit used to inherit whatever the
+       OS preferred, so most people never saw it.
+{% endcomment %}
+    <div class="theme">
+      <div class="theme__label" id="theme-label">Appearance</div>
+      <div class="theme__options" role="group" aria-labelledby="theme-label">
+        <button class="theme__option" type="button" data-set-theme="light">Light</button>
+        <button class="theme__option" type="button" data-set-theme="dark">Dark</button>
+        <button class="theme__option" type="button" data-set-theme="system">System</button>
+      </div>
+    </div>
   </nav>
 
   <main class="content{% block content_class %}{% endblock %}">
     {% block content %}{% endblock %}
   </main>
 </div>
+
+{% comment %}
+Switching is instant and local: the attribute drives the tokens, and the
+   cookie is only so the next page load starts where this one left off. No round
+   trip, because a colour scheme is not worth one.
+
+   Without JavaScript the buttons do nothing and the reader gets light, which is
+   the default they would have had anyway.
+{% endcomment %}
+<script>
+(function () {
+  var root = document.documentElement;
+  var buttons = document.querySelectorAll('[data-set-theme]');
+
+  function paint(choice) {
+    for (var i = 0; i < buttons.length; i++) {
+      var mine = buttons[i].getAttribute('data-set-theme') === choice;
+      buttons[i].setAttribute('aria-pressed', mine ? 'true' : 'false');
+    }
+  }
+
+  // An absent or unrecognised cookie is light, which is what the stylesheet
+  // does too — the control must agree with what is actually on screen.
+  var current = root.getAttribute('data-theme');
+  if (current !== 'dark' && current !== 'system') { current = 'light'; }
+  paint(current);
+
+  for (var i = 0; i < buttons.length; i++) {
+    buttons[i].addEventListener('click', function (event) {
+      var choice = event.currentTarget.getAttribute('data-set-theme');
+      root.setAttribute('data-theme', choice);
+      document.cookie = 'complylayer_theme=' + choice + '; path=/; max-age=31536000; samesite=lax';
+      paint(choice);
+    });
+  }
+})();
+</script>
 </body>
 </html>

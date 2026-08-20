@@ -591,3 +591,62 @@ a:visited {
   color: var(--ink-muted);
   letter-spacing: 0.01em;
 }
+
+/* ── Theme control ────────────────────────────────────────────────────────
+ * Light, dark, or follow the operating system. Light is the default, because
+ * the palette this product is designed around is warm paper and a first visit
+ * used to inherit whatever the OS preferred.
+ *
+ * Marked by weight and a filled ground rather than a hue, like every other
+ * selected state here — a coloured pill for the active theme would be the one
+ * saturated thing on screen that does not mean block, flag or allow.
+ */
+.theme {
+  margin-top: auto;
+  padding: var(--space-xl) var(--space-xl) 0;
+}
+.theme__label {
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: var(--space-sm);
+}
+.theme__options {
+  display: flex;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.theme__option {
+  flex: 1;
+  font-family: var(--font-body);
+  font-size: 12px;
+  line-height: 16px;
+  padding: var(--space-xs) 0;
+  background: transparent;
+  color: var(--ink-muted);
+  border: 0;
+  border-right: 1px solid var(--rule);
+  cursor: pointer;
+  transition: background var(--duration-micro) var(--ease-enter);
+}
+.theme__option:last-child {
+  border-right: 0;
+}
+.theme__option:hover {
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+.theme__option[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--surface-raised);
+  font-weight: 500;
+}
+/* The sidebar has to become a column for `margin-top: auto` to push the control
+ * to the bottom of it. */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+}
