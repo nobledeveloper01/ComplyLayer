@@ -51,6 +51,22 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH" \
     DJANGO_SETTINGS_MODULE=server.settings
 
+# Apply whatever security updates Debian has shipped since this base image was
+# published. The first trixie dry run failed the release scan on `bsdutils
+# 1:2.41-5`, where `2.41.5-0+deb13u1` had been available for a while — the
+# patch existed, the base image simply predated it, and base images are rebuilt
+# on somebody else's cadence.
+#
+# The cost is honest: this makes the build non-reproducible, because the same
+# Dockerfile produces different packages on different days. That is the right
+# trade for a container that makes compliance decisions — the alternative is
+# reproducibly shipping a known-vulnerable package — but it is a trade, and the
+# image digest is what pins a release rather than this file.
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
 # Non-root, and the account has no shell. A container that cannot log in is one
 # fewer thing to reason about when somebody finds a way to run a command in it.
 RUN groupadd --system --gid 1001 complylayer \
