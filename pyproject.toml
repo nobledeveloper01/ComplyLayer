@@ -1,6 +1,6 @@
 [project]
 name = "complylayer"
-version = "0.0.0"
+version = "0.1.0"
 description = "Pluggable compliance rules and decision engine for fintechs"
 readme = "README.md"
 requires-python = "==3.12.*"
