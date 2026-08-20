@@ -8,6 +8,49 @@
  * means nothing.
  */
 
+/* The three families DESIGN.md specifies, self-hosted.
+ *
+ * These were named in the tokens from the start and never actually loaded:
+ * there was no @font-face rule anywhere and no file on disk, so Instrument
+ * Serif fell back to Georgia, Geist to system-ui and JetBrains Mono to SF Mono.
+ * A design whose stated decoration level is "typography and one accent do all
+ * the work" had been rendering in whatever the operating system supplied.
+ *
+ * Self-hosted rather than a CDN, and that is a security decision rather than a
+ * performance one: a third-party font request from a regulated customer's
+ * browser is a conversation nobody wants to have with their security team.
+ *
+ * Latin subsets only, which is what the product's copy needs; Geist and
+ * JetBrains Mono are variable, so one file covers every weight used.
+ *
+ * `swap`, deliberately. A compliance officer reading a limit in a fallback face
+ * for 100ms is fine; a blank screen while a font loads is not.
+ */
+
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("fonts/instrument-serif-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist";
+  src: url("fonts/geist-variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/jetbrains-mono-variable.woff2") format("woff2-variations");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* Neutrals — warm, not blue-grey. Blue-grey is the category's tell; warm grey
    * reads as paper and ink, which suits a system of record. */

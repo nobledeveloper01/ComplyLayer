@@ -2,9 +2,9 @@
 <html lang="en"><head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Set up your authenticator — ComplyLayer</title>
-  {% load static %}
-  <link rel="stylesheet" href="{% static 'complylayer/tokens.css' %}">
-  <link rel="stylesheet" href="{% static 'complylayer/dashboard.css' %}">
+  {% load static complylayer_static %}
+  <link rel="stylesheet" href="{% static_v 'complylayer/tokens.css' %}">
+  <link rel="stylesheet" href="{% static_v 'complylayer/dashboard.css' %}">
 </head><body>
 <main class="content content--prose" style="max-width: 480px; margin: 8vh auto;">
   <h1>Set up your authenticator</h1>

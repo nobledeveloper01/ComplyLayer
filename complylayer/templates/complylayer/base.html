@@ -10,9 +10,9 @@ The shell every dashboard page renders into.
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}ComplyLayer{% endblock %}</title>
-  {% load static %}
-  <link rel="stylesheet" href="{% static 'complylayer/tokens.css' %}">
-  <link rel="stylesheet" href="{% static 'complylayer/dashboard.css' %}">
+  {% load static complylayer_static %}
+  <link rel="stylesheet" href="{% static_v 'complylayer/tokens.css' %}">
+  <link rel="stylesheet" href="{% static_v 'complylayer/dashboard.css' %}">
 </head>
 <body>
 {% if degraded_banner %}
