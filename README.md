@@ -1195,6 +1195,10 @@ This split was chosen on the maintainer's behalf and is reversible.
 
 ## 12. Status
 
+Released: **[v0.1.1](https://github.com/nobledeveloper01/ComplyLayer/releases/tag/v0.1.1)**,
+a signed image on ghcr. [`CHANGELOG.md`](CHANGELOG.md) records what is in it, and
+why 0.1.0 released nothing.
+
 All nine phases complete. A phase is ticked when its exit gate in
 [`docs/ROADMAP.md`](docs/ROADMAP.md) is green in CI, not when it feels finished.
 
