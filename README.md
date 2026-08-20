@@ -1206,6 +1206,7 @@ latency budget and reproducible decisions — the three claims §13 rests on. Ph
 | Non-root container on a read-only rootfs | Done — built and smoke-tested in CI |
 | Node SDK, required `fallback` | Done |
 | Release pipeline: PyPI, npm, ghcr, cosign, trivy | Done — every action SHA-pinned |
+| Rehearsing a release without cutting one | Done — `workflow_dispatch` is unconditionally a dry run, and a test enforces that every publishing step is gated on a tag |
 | Preflight for the silent failure modes | Done — 9 checks, each with its remediation |
 | Key management: issue, list, revoke, no escalation | Done — a key cannot mint one with permissions it lacks |
 | **1,011 tests, 92.6% coverage** | |

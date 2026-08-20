@@ -15,6 +15,20 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Rehearse the whole pipeline without releasing anything.
+  #
+  # **A dispatch is always a dry run.** There is deliberately no "publish"
+  # input: a checkbox that can be ticked into an irreversible PyPI or npm upload
+  # is a footgun, and a dispatch has no tag, so anything it published would be a
+  # version that corresponds to nothing. Publishing is gated on
+  # `github.event_name == 'push'` at every step that uploads, signs or logs in,
+  # which makes "released from a tag" structural rather than procedural.
+  #
+  # This exists because `release.yml` only ever runs on a tag, so its actions —
+  # setup-node, build-push-action, setup-buildx — were bumped across major
+  # versions with nothing exercising them until the next release. A pipeline
+  # nobody can rehearse is a pipeline that is first tested by needing it.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -56,6 +70,7 @@ jobs:
       - run: uv run pytest -m "not benchmark" --cov=complylayer
 
       - name: the tag matches the packaged version
+        if: github.event_name == 'push'
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           PY=$(uv run python -c "import complylayer; print(complylayer.__version__)")
@@ -64,11 +79,29 @@ jobs:
           test "$TAG" = "$PY" || { echo "::error::tag $TAG does not match complylayer $PY"; exit 1; }
           test "$TAG" = "$NODE" || { echo "::error::tag $TAG does not match the SDK $NODE"; exit 1; }
 
+      # On a dispatch there is no tag to match, so the assertion above is
+      # meaningless — `GITHUB_REF_NAME` is a branch. The half that still means
+      # something is that the two packages agree with each other, which is the
+      # thing a release would otherwise discover at the worst moment.
+      - name: the two packages agree on a version
+        if: github.event_name != 'push'
+        run: |
+          PY=$(uv run python -c "import complylayer; print(complylayer.__version__)")
+          NODE=$(node -p "require('./sdk/node/package.json').version")
+          echo "python=$PY node=$NODE (dry run: no tag to compare against)"
+          test "$PY" = "$NODE" || {
+            echo "::error::complylayer $PY and the SDK $NODE disagree; a tag cannot match both"
+            exit 1
+          }
+
   python:
     name: pypi
     needs: verify
     runs-on: ubuntu-latest
-    environment: release
+    # No environment on a dry run: the release environment holds the publishing
+    # credentials, and a rehearsal that does not publish has no business
+    # requesting them — or waiting on whatever approval guards them.
+    environment: ${{ github.event_name == 'push' && 'release' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -82,12 +115,16 @@ jobs:
           python -m zipfile -l dist/*.whl | grep -q 'complylayer/templates/complylayer/builder.html'
           python -m zipfile -l dist/*.whl | grep -q 'complylayer/static/complylayer/tokens.css'
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        if: github.event_name == 'push'
+      - name: what a dry run skipped
+        if: github.event_name != 'push'
+        run: echo "dry run — the wheel built and was checked, and was not uploaded to PyPI"
 
   node:
     name: npm
     needs: verify
     runs-on: ubuntu-latest
-    environment: release
+    environment: ${{ github.event_name == 'push' && 'release' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -103,9 +140,17 @@ jobs:
         with: { node-version: "22", registry-url: "https://registry.npmjs.org" }
       - run: node --test sdk/node/src/index.test.js
       - run: npm publish --provenance --access public
+        if: github.event_name == 'push'
         working-directory: sdk/node
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # `--dry-run` packs the tarball and prints exactly what would ship without
+      # contacting the registry, which is the half of publishing that has ever
+      # actually been wrong here: the `files` list.
+      - run: npm publish --dry-run --access public
+        if: github.event_name != 'push'
+        working-directory: sdk/node
 
   image:
     name: image
@@ -115,28 +160,65 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      # Not even a login on a dry run. `packages: write` is granted to this job
+      # and a rehearsal has no reason to hold a registry session, so the
+      # credential is never exchanged in the first place.
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        if: github.event_name == 'push'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # `push` and `load` are the switch. On a tag the image goes to ghcr; on a
+      # dispatch it is loaded into the local daemon under a throwaway tag, so
+      # trivy still has something real to scan and nothing leaves the runner.
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         id: build
         with:
           context: .
-          push: true
-          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-          provenance: true
-          sbom: true
+          push: ${{ github.event_name == 'push' }}
+          load: ${{ github.event_name != 'push' }}
+          tags: ${{ github.event_name == 'push' && format('ghcr.io/{0}:{1}', github.repository, github.ref_name) || 'complylayer:dry-run' }}
+          provenance: ${{ github.event_name == 'push' }}
+          sbom: ${{ github.event_name == 'push' }}
 
+      # The same scan either way, against whichever image this run produced.
       - name: trivy
         uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297 # master
         with:
-          image-ref: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          image-ref: ${{ github.event_name == 'push' && format('ghcr.io/{0}:{1}', github.repository, github.ref_name) || 'complylayer:dry-run' }}
           exit-code: "1"
           severity: HIGH,CRITICAL
 
+      # The rehearsal's real question: does the thing start? CI already smokes
+      # the image on every commit, and repeating it here means a dry run
+      # exercises the release build rather than only proving it compiles.
+      - name: the release image serves /healthz
+        if: github.event_name != 'push'
+        run: |
+          docker run -d --name cl-release-smoke -p 8000:8000 \
+            -e COMPLYLAYER_DB_HOST=127.0.0.1 \
+            -e COMPLYLAYER_SECRET_KEY="${{ github.sha }}-dry-run-only" \
+            -e COMPLYLAYER_CUSTOMER_SALT="${{ github.sha }}-dry-run-salt" \
+            complylayer:dry-run
+          for _ in $(seq 1 30); do
+            if curl -fs localhost:8000/healthz >/dev/null 2>&1; then
+              echo "the release image serves /healthz"; docker rm -f cl-release-smoke; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the release image never answered /healthz"
+          docker logs cl-release-smoke; docker rm -f cl-release-smoke; exit 1
+
       - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        if: github.event_name == 'push'
       - name: sign
+        if: github.event_name == 'push'
         run: cosign sign --yes ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+
+      - name: what a dry run skipped
+        if: github.event_name != 'push'
+        run: |
+          echo "dry run — built, scanned and started the image locally."
+          echo "Not done: pushed to ghcr, generated provenance or an SBOM, signed with cosign."
