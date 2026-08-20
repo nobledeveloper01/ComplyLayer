@@ -98,10 +98,11 @@ jobs:
     name: pypi
     needs: verify
     runs-on: ubuntu-latest
-    # No environment on a dry run: the release environment holds the publishing
-    # credentials, and a rehearsal that does not publish has no business
-    # requesting them — or waiting on whatever approval guards them.
-    environment: ${{ github.event_name == 'push' && 'release' || '' }}
+    # No environment unless this run actually publishes: the release environment
+    # holds the publishing credentials, and a run that does not publish has no
+    # business requesting them — or waiting on whatever approval guards them.
+    # That covers both a rehearsal and a tag whose registry is not wired up yet.
+    environment: ${{ github.event_name == 'push' && vars.PUBLISH_PYPI == 'true' && 'release' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -114,17 +115,38 @@ jobs:
         run: |
           python -m zipfile -l dist/*.whl | grep -q 'complylayer/templates/complylayer/builder.html'
           python -m zipfile -l dist/*.whl | grep -q 'complylayer/static/complylayer/tokens.css'
+      # Publishing is opt-in per registry, and off until the registry is wired up.
+      #
+      # PyPI cannot be uploaded to until somebody has configured a trusted
+      # publisher there, and until then a tag would fail this job on a credential
+      # that was never set up. A release that goes red for a reason nobody can
+      # act on from the repository teaches people to ignore red releases — the
+      # same failure mode that nearly cost this project its CVE gate.
+      #
+      # So the tag still cuts a release; this registry simply is not part of it
+      # yet, and says so. Turn it on once the publisher exists:
+      #
+      #   gh variable set PUBLISH_PYPI --body true
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
-        if: github.event_name == 'push'
-      - name: what a dry run skipped
-        if: github.event_name != 'push'
-        run: echo "dry run — the wheel built and was checked, and was not uploaded to PyPI"
+        if: github.event_name == 'push' && vars.PUBLISH_PYPI == 'true'
+
+      - name: what this run did not upload
+        if: github.event_name != 'push' || vars.PUBLISH_PYPI != 'true'
+        run: |
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "dry run — the wheel built and was checked, and was not uploaded to PyPI"
+          else
+            echo "::notice::PUBLISH_PYPI is not set: the wheel built and was checked, and was not uploaded."
+            echo "The tag still released the image. To add PyPI, configure a trusted publisher"
+            echo "for 'complylayer' (workflow release.yml, environment release), then:"
+            echo "  gh variable set PUBLISH_PYPI --body true"
+          fi
 
   node:
     name: npm
     needs: verify
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'push' && 'release' || '' }}
+    environment: ${{ github.event_name == 'push' && vars.PUBLISH_NPM == 'true' && 'release' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -139,8 +161,12 @@ jobs:
         # support is a decision about customers rather than about CI.
         with: { node-version: "22", registry-url: "https://registry.npmjs.org" }
       - run: node --test sdk/node/src/index.test.js
+      # Same switch as PyPI, and here the missing piece is concrete: the package
+      # is scoped, so it needs an npm organisation to exist as well as a token.
+      #
+      #   gh secret set NPM_TOKEN && gh variable set PUBLISH_NPM --body true
       - run: npm publish --provenance --access public
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && vars.PUBLISH_NPM == 'true'
         working-directory: sdk/node
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -149,8 +175,15 @@ jobs:
       # contacting the registry, which is the half of publishing that has ever
       # actually been wrong here: the `files` list.
       - run: npm publish --dry-run --access public
-        if: github.event_name != 'push'
+        if: github.event_name != 'push' || vars.PUBLISH_NPM != 'true'
         working-directory: sdk/node
+
+      - name: what this run did not upload
+        if: github.event_name == 'push' && vars.PUBLISH_NPM != 'true'
+        run: |
+          echo "::notice::PUBLISH_NPM is not set: the tarball was packed and checked, and was not uploaded."
+          echo "The tag still released the image. To add npm, create the 'complylayer' org, then:"
+          echo "  gh secret set NPM_TOKEN && gh variable set PUBLISH_NPM --body true"
 
   image:
     name: image

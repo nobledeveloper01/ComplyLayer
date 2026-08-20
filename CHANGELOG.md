@@ -13,6 +13,15 @@ SDKs depend on; everything around it may still move.
 First release. Nine phases, 1015 tests, and a decision path that has been run
 rather than only tested.
 
+**Published as a container image only.** `ghcr.io/nobledeveloper01/complylayer:v0.1.0`,
+with provenance, an SBOM and a cosign signature. The Python package and the Node
+SDK are built, checked and versioned identically by the same tag, and are not
+uploaded: PyPI needs a trusted publisher configured there and the scoped npm
+package needs an organisation, neither of which the repository can arrange for
+itself. Publishing to each is a repository variable (`PUBLISH_PYPI`,
+`PUBLISH_NPM`) that turns on once its registry exists, so the release is a
+release of what could actually be released rather than a red pipeline.
+
 ### The engine
 
 - A rule DSL that is parsed and walked, never `eval`ed — enforced at build time

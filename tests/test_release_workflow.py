@@ -139,3 +139,59 @@ def test_every_action_is_still_pinned_to_a_commit(workflow):
         if step.get("uses") and not re.search(r"@[0-9a-f]{40}\b", step["uses"])
     ]
     assert not unpinned, f"these actions are not pinned to a commit: {unpinned}"
+
+
+# Registry publishing is opt-in per registry. PyPI needs a trusted publisher
+# configured there and npm needs an organisation and a token, and neither is
+# something the repository can arrange for itself. Before this, a tag failed
+# both jobs on credentials nobody had set up — a red release for a reason no
+# reader could act on, which is how a gate stops being read at all.
+REGISTRY_FLAGS = {
+    "pypi-publish": "vars.PUBLISH_PYPI == 'true'",
+    "npm publish": "vars.PUBLISH_NPM == 'true'",
+}
+
+
+def test_each_registry_upload_is_also_gated_on_its_own_flag(workflow):
+    """A tag releases the image. It uploads to a registry only if that registry
+    has been wired up, and the flag is the record of whether it has."""
+    for marker, flag in REGISTRY_FLAGS.items():
+        uploads = [
+            step
+            for _, step, text in steps(workflow)
+            if marker in text and not any(s in text for s in SAFE)
+        ]
+        assert uploads, f"no upload step found for {marker}"
+        for step in uploads:
+            condition = str(step.get("if", ""))
+            assert flag in condition, (
+                f"the {marker} step is not gated on {flag}: {condition!r}. Without it a "
+                "tag fails on a credential nobody configured, rather than releasing what it can."
+            )
+
+
+def test_the_flags_cannot_publish_without_a_tag(workflow):
+    """The registry flag is an extra condition, never a replacement for the tag
+    gate — a repository variable must not be able to turn a rehearsal into an
+    upload. This is `test_every_publishing_step_is_gated_on_a_tag_push` stated
+    for the specific way that gate could now be lost."""
+    for marker in REGISTRY_FLAGS:
+        for _, step, text in steps(workflow):
+            if marker not in text or any(s in text for s in SAFE):
+                continue
+            assert PUSH_ONLY in str(step.get("if", "")), (
+                f"the {marker} step lost its tag gate when the registry flag was added"
+            )
+
+
+def test_the_image_does_not_depend_on_a_registry_flag(workflow):
+    """ghcr needs no credential this repository lacks — the token is automatic
+    and cosign signs keylessly. The image is what a tag always releases, so
+    gating it behind an opt-in would make a tag able to release nothing at all."""
+    for _, step, text in steps(workflow):
+        if "cosign sign" in text or "login-action" in text:
+            condition = str(step.get("if", ""))
+            assert "vars.PUBLISH" not in condition, (
+                f"the image step is gated on a registry flag ({condition!r}); a tag must always "
+                "produce a signed image"
+            )
