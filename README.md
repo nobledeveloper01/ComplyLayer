@@ -1170,6 +1170,8 @@ sdk/node/                 TypeScript client, no dependencies
 deploy/k6/                load profile for the decision endpoint
 LICENSE                   BUSL-1.1 for the server
 sdk/LICENSE               Apache-2.0 for the client
+sdk/node/LICENSE          the same text again, at the npm package root, because
+                          npm only ships a LICENSE it finds beside package.json
 ```
 
 ---
@@ -1187,7 +1189,10 @@ release — so the terms have an end, and a customer who outlives the company ge
 an open licence rather than an orphaned binary.
 
 **The client library is Apache-2.0** ([`sdk/`](sdk/)), including the patent grant.
-Anyone integrating should be able to use it without a lawyer.
+Anyone integrating should be able to use it without a lawyer — and the published
+tarball carries the text, which it did not until `npm publish --dry-run` was read
+rather than trusted: `files` lists only `src`, and npm auto-includes a licence
+only from the package root.
 
 This split was chosen on the maintainer's behalf and is reversible.
 
