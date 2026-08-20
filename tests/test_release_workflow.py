@@ -89,11 +89,36 @@ def test_the_image_is_not_pushed_on_a_dispatch(workflow):
     assert "!=" in str(with_["load"]), "a dry run must load locally so trivy has something to scan"
 
 
+def trivy_steps(workflow):
+    return [step for _, step, text in steps(workflow) if "trivy-action" in text]
+
+
 def test_the_image_is_scanned_either_way(workflow):
     """The rehearsal is worth less if it skips the check that blocks releases."""
-    trivy = next(step for _, step, text in steps(workflow) if "trivy-action" in text)
-    assert "if" not in trivy, "trivy should run on a dispatch too"
-    assert trivy["with"]["exit-code"] == "1", "a scan that cannot fail is not a gate"
+    scans = trivy_steps(workflow)
+    assert scans, "the image is not scanned at all"
+    for scan in scans:
+        assert "if" not in scan, "trivy should run on a dispatch too"
+
+
+def test_one_scan_can_still_fail_the_release(workflow):
+    """The gate ignores CVEs with no available fix — the first dry run found 34
+    of them, every one with an empty Fixed Version — but it must still block on
+    anything that *can* be acted on. A scan where nothing fails is decoration."""
+    blocking = [s for s in trivy_steps(workflow) if s["with"]["exit-code"] == "1"]
+    assert len(blocking) == 1, f"expected exactly one blocking scan, found {len(blocking)}"
+    assert blocking[0]["with"]["ignore-unfixed"] is True, (
+        "the blocking scan must ignore unfixed CVEs, or it fails on findings nobody "
+        "can act on and gets deleted within a month"
+    )
+
+
+def test_the_unfixed_ones_are_still_reported(workflow):
+    """Ignoring a CVE in the gate says it cannot be acted on today, not that it
+    does not exist. Somebody reading a release log should still see it."""
+    reporting = [s for s in trivy_steps(workflow) if s["with"]["exit-code"] == "0"]
+    assert len(reporting) == 1, "nothing reports the CVEs the gate ignores"
+    assert reporting[0]["with"]["ignore-unfixed"] is False
 
 
 def test_the_release_credentials_are_not_requested_by_a_rehearsal(workflow):

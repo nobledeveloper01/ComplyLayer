@@ -183,12 +183,37 @@ jobs:
           provenance: ${{ github.event_name == 'push' }}
           sbom: ${{ github.event_name == 'push' }}
 
-      # The same scan either way, against whichever image this run produced.
-      - name: trivy
+      # Two scans, because one number was answering two different questions.
+      #
+      # **The blocking one ignores unfixed CVEs.** The first dry run failed here
+      # on 34 findings — 28 HIGH, 6 CRITICAL — and every single one had an empty
+      # Fixed Version: `affected`, `fix_deferred` or `will_not_fix` in Debian's
+      # tracker. The base image already tracks the current `bookworm-slim`, so
+      # there was no version to move to and nothing anybody could have done
+      # except stop releasing.
+      #
+      # A gate that cannot be satisfied is a gate that gets deleted, which is how
+      # this project lost a latency assertion earlier. So this one fails on what
+      # is actionable: a HIGH or CRITICAL with a patch available blocks the
+      # release, and rightly.
+      - name: trivy (blocking — anything with a fix available)
         uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297 # master
         with:
           image-ref: ${{ github.event_name == 'push' && format('ghcr.io/{0}:{1}', github.repository, github.ref_name) || 'complylayer:dry-run' }}
           exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      # And the unfixed ones stay visible rather than being silently dropped.
+      # Ignoring a CVE in the gate is a statement that it cannot be acted on
+      # today, not that it does not exist — somebody reading a release log should
+      # still see what is riding along in the base image.
+      - name: trivy (reporting — including what has no fix yet)
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297 # master
+        with:
+          image-ref: ${{ github.event_name == 'push' && format('ghcr.io/{0}:{1}', github.repository, github.ref_name) || 'complylayer:dry-run' }}
+          exit-code: "0"
+          ignore-unfixed: false
           severity: HIGH,CRITICAL
 
       # The rehearsal's real question: does the thing start? CI already smokes
