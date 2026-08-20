@@ -19,6 +19,7 @@ the condition, which is the direction the mistake actually gets made.
 from __future__ import annotations
 
 import pathlib
+import re
 
 import pytest
 import yaml
@@ -195,3 +196,85 @@ def test_the_image_does_not_depend_on_a_registry_flag(workflow):
                 f"the image step is gated on a registry flag ({condition!r}); a tag must always "
                 "produce a signed image"
             )
+
+
+# v0.1.0's first tag failed with `invalid tag: repository name must be
+# lowercase` — `github.repository` is `nobledeveloper01/ComplyLayer` and a
+# registry will not take capitals. Four rehearsals had gone green, and none of
+# them could have caught it: a dispatch built a throwaway `complylayer:dry-run`
+# while a tag built `ghcr.io/{github.repository}:{ref_name}`, so the reference
+# itself was the one part of a release the rehearsal did not rehearse.
+IMAGE_REF = "steps.ref.outputs.image"
+
+
+def image_steps(workflow):
+    """Every step that names an image to build, scan or run — excluding the one
+    that computes the reference, which necessarily spells `ghcr.io` out."""
+    for _, step, _text in steps(workflow):
+        if step.get("id") == "ref":
+            continue
+        with_ = step.get("with") or {}
+        for value in (with_.get("tags"), with_.get("image-ref"), step.get("run")):
+            if value and ("ghcr.io" in str(value) or "docker run" in str(value)):
+                yield str(value)
+
+
+def test_the_rehearsal_and_the_release_name_the_image_the_same_way(workflow):
+    """One computed reference, used by both paths. A dispatch differs only in
+    the tag, so anything wrong with how the name is built fails a rehearsal."""
+    for value in image_steps(workflow):
+        if "cosign" in value:
+            continue  # signs a digest, checked separately below
+        assert IMAGE_REF in value, (
+            f"this step names an image without going through the computed reference: {value!r}. "
+            "A dry run must build the same string as a release, or the reference is untested."
+        )
+
+
+def test_the_reference_is_lowercased(workflow):
+    """The actual defect. `github.repository` carries the owner's capitalisation
+    and a registry rejects it."""
+    ref = next(step for _, step, _ in steps(workflow) if step.get("id") == "ref")
+    assert "${GITHUB_REPOSITORY,,}" in ref["run"], (
+        "the image reference is not lowercased; a repository name with capitals "
+        "fails the build with `repository name must be lowercase`"
+    )
+
+
+def test_nothing_reconstructs_the_reference_by_hand(workflow):
+    """The failure mode this replaces: two places building the same string, one
+    of them wrong. Signing is the case that matters — it names the repository
+    separately from the build, so it could sign something else entirely."""
+    for _, step, text in steps(workflow):
+        if "cosign sign" in text:
+            assert "steps.ref.outputs.repo" in text, (
+                f"cosign rebuilds the repository name instead of using the computed one: {text!r}"
+            )
+        if "github.repository" in text and step.get("id") != "ref":
+            assert "format('ghcr.io/" not in text, (
+                f"an image reference is built by hand here: {text!r}"
+            )
+
+
+def test_only_the_tag_differs_between_a_rehearsal_and_a_release(workflow):
+    """Routing both paths through one computed reference is not enough on its
+    own — the reference could still compute a different *repository* for a dry
+    run, which is precisely the shape of the bug this replaced. The event may
+    choose the tag and nothing else, so the registry, the repository and the
+    lowercasing are all exercised by a dispatch."""
+    ref = next(step for _, step, _ in steps(workflow) if step.get("id") == "ref")
+    # Anywhere in the line, not only at the start of it. `... || REPO=other` is
+    # an assignment too, and is how a second one gets added without looking like
+    # one — the first version of this test matched line starts and missed
+    # exactly that.
+    assignments = [
+        line.strip() for line in ref["run"].splitlines() if re.search(r"(?<![$\w])REPO=", line)
+    ]
+    assert len(assignments) == 1, (
+        f"the repository is assigned {len(assignments)} times in the reference step: "
+        f"{assignments}. More than one is how a dry run starts naming a different image."
+    )
+    assert "github.event_name" not in assignments[0], (
+        f"the repository depends on the event: {assignments[0]!r}. Only the tag may — "
+        "otherwise a rehearsal stops exercising the name a release builds."
+    )

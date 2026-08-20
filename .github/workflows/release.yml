@@ -206,13 +206,34 @@ jobs:
       # `push` and `load` are the switch. On a tag the image goes to ghcr; on a
       # dispatch it is loaded into the local daemon under a throwaway tag, so
       # trivy still has something real to scan and nothing leaves the runner.
+      # The image reference, computed once and used by every step below.
+      #
+      # `github.repository` is `nobledeveloper01/ComplyLayer`, and a registry
+      # requires a lowercase repository name — so v0.1.0's first tag failed here
+      # with `invalid tag: repository name must be lowercase`, after four green
+      # rehearsals. The rehearsals could not have caught it: a dispatch built a
+      # throwaway `complylayer:dry-run`, so the reference itself was the one part
+      # of a release the rehearsal did not rehearse.
+      #
+      # Both paths now build the same string through the same lowercasing and
+      # differ only in the tag, which is what makes a dispatch able to fail on
+      # this at all.
+      - name: the image reference
+        id: ref
+        run: |
+          REPO="${GITHUB_REPOSITORY,,}"
+          TAG="${{ github.event_name == 'push' && github.ref_name || 'dry-run' }}"
+          echo "repo=ghcr.io/$REPO" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/$REPO:$TAG" >> "$GITHUB_OUTPUT"
+          echo "this run builds ghcr.io/$REPO:$TAG"
+
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         id: build
         with:
           context: .
           push: ${{ github.event_name == 'push' }}
           load: ${{ github.event_name != 'push' }}
-          tags: ${{ github.event_name == 'push' && format('ghcr.io/{0}:{1}', github.repository, github.ref_name) || 'complylayer:dry-run' }}
+          tags: ${{ steps.ref.outputs.image }}
           provenance: ${{ github.event_name == 'push' }}
           sbom: ${{ github.event_name == 'push' }}
 
@@ -232,7 +253,7 @@ jobs:
       - name: trivy (blocking — anything with a fix available)
         uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297 # master
         with:
-          image-ref: ${{ github.event_name == 'push' && format('ghcr.io/{0}:{1}', github.repository, github.ref_name) || 'complylayer:dry-run' }}
+          image-ref: ${{ steps.ref.outputs.image }}
           exit-code: "1"
           ignore-unfixed: true
           severity: HIGH,CRITICAL
@@ -244,7 +265,7 @@ jobs:
       - name: trivy (reporting — including what has no fix yet)
         uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297 # master
         with:
-          image-ref: ${{ github.event_name == 'push' && format('ghcr.io/{0}:{1}', github.repository, github.ref_name) || 'complylayer:dry-run' }}
+          image-ref: ${{ steps.ref.outputs.image }}
           exit-code: "0"
           ignore-unfixed: false
           severity: HIGH,CRITICAL
@@ -259,7 +280,7 @@ jobs:
             -e COMPLYLAYER_DB_HOST=127.0.0.1 \
             -e COMPLYLAYER_SECRET_KEY="${{ github.sha }}-dry-run-only" \
             -e COMPLYLAYER_CUSTOMER_SALT="${{ github.sha }}-dry-run-salt" \
-            complylayer:dry-run
+            ${{ steps.ref.outputs.image }}
           for _ in $(seq 1 30); do
             if curl -fs localhost:8000/healthz >/dev/null 2>&1; then
               echo "the release image serves /healthz"; docker rm -f cl-release-smoke; exit 0
@@ -273,7 +294,7 @@ jobs:
         if: github.event_name == 'push'
       - name: sign
         if: github.event_name == 'push'
-        run: cosign sign --yes ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+        run: cosign sign --yes ${{ steps.ref.outputs.repo }}@${{ steps.build.outputs.digest }}
 
       - name: what a dry run skipped
         if: github.event_name != 'push'
