@@ -645,6 +645,37 @@ and a silent default is one a fintech discovers during an outage.
 
 ## 4. Try it
 
+### The released image
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e COMPLYLAYER_SECRET_KEY=... -e COMPLYLAYER_CUSTOMER_SALT=... \
+  ghcr.io/nobledeveloper01/complylayer:v0.1.1
+```
+
+`linux/amd64` only — it is built on an `ubuntu-latest` runner and no second
+architecture is cross-built, so on Apple Silicon it needs `--platform
+linux/amd64` and emulation.
+
+The image is signed, and the signature is worth checking rather than assuming:
+
+```bash
+cosign verify ghcr.io/nobledeveloper01/complylayer:v0.1.1 \
+  --certificate-identity-regexp 'https://github.com/nobledeveloper01/ComplyLayer/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+That names the workflow that built it — `release.yml@refs/tags/v0.1.1` — which
+is the property SHA-pinning every action exists to protect. A signature that
+verifies against an identity nobody checks is decoration.
+
+**The Python package and the Node SDK are not published.** Both are built,
+checked and versioned by the same tag; uploading them needs a PyPI trusted
+publisher and an npm organisation, neither of which the repository can create
+for itself, so each is behind a variable that turns on when its registry
+exists. A tag releases what can actually be released rather than going red on a
+credential nobody configured. Until then, install from source below.
+
 ### See it work first
 
 ```bash
