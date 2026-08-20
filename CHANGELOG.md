@@ -8,9 +8,28 @@ tag, so a client never has to be matched against a server by hand.
 (`decision`, `reasons`, `rule_version`, `decision_id`) is stable and is what the
 SDKs depend on; everything around it may still move.
 
+## 0.1.1
+
+The first release that exists. `v0.1.0` was tagged and released nothing: the
+image build rejected `ghcr.io/nobledeveloper01/ComplyLayer:v0.1.0`, because a
+registry requires a lowercase repository name and this one has capitals in it.
+The tag is left where it is rather than moved, since a tag that has been pushed
+is not a thing to reuse.
+
+Four rehearsals had gone green beforehand and none of them could have caught it.
+A dispatch built a throwaway `complylayer:dry-run` while a tag built
+`ghcr.io/{github.repository}:{ref_name}`, so the one part of a release the
+rehearsal did not rehearse was the name of the thing being released. Both paths
+now compute one reference and differ only in the tag, and
+`tests/test_release_workflow.py` holds that shape in place — including the
+narrower claim that only the *tag* may depend on the event, which is what makes
+the lowercasing something a dry run exercises.
+
+Contents are otherwise identical to what 0.1.0 described.
+
 ## 0.1.0
 
-First release. Nine phases, 1015 tests, and a decision path that has been run
+Tagged, never published — see above. First release. Nine phases, 1015 tests, and a decision path that has been run
 rather than only tested.
 
 **Published as a container image only.** `ghcr.io/nobledeveloper01/complylayer:v0.1.0`,

@@ -1,6 +1,6 @@
 {
   "name": "@complylayer/node",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Compliance decisions for Node. One call before you move money.",
   "type": "module",
   "main": "./src/index.js",
