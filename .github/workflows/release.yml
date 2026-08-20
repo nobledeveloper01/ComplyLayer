@@ -91,7 +91,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with: { node-version: "20", registry-url: "https://registry.npmjs.org" }
+        # 22, not 20: Node 20 is past end of life, and publishing from an
+        # unsupported runtime means security fixes stop reaching the thing that
+        # signs and uploads the package.
+        #
+        # The SDK still declares `engines: >=20`, so this tests one version
+        # above its own floor. That is deliberate but not free — nothing here
+        # verifies the 20 claim any more. If that matters, the fix is a matrix
+        # over 20 and 22 rather than moving the floor, because dropping Node 20
+        # support is a decision about customers rather than about CI.
+        with: { node-version: "22", registry-url: "https://registry.npmjs.org" }
       - run: node --test sdk/node/src/index.test.js
       - run: npm publish --provenance --access public
         working-directory: sdk/node
