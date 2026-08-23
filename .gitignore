@@ -19,3 +19,4 @@ sbom.json
 *.sqlite3
 .DS_Store
 .gstack/
+CLAUDE.md
