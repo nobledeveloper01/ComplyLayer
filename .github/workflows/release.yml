@@ -196,7 +196,7 @@ jobs:
       # Not even a login on a dry run. `packages: write` is granted to this job
       # and a rehearsal has no reason to hold a registry session, so the
       # credential is never exchanged in the first place.
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         if: github.event_name == 'push'
         with:
           registry: ghcr.io
